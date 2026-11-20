@@ -255,16 +255,18 @@ private fun LocationInfo(state: MainUiState) {
     val speed = location.speedMph?.let { "%.0f mph".format(it) }
     Text(
         text = when {
-            location.inVehicle -> "GPS: In a vehicle" + (speed?.let { " ($it)" } ?: "")
-            location.gpsOn -> "GPS: checking speed" + (speed?.let { "… $it" } ?: "…")
+            location.inVehicle && location.gpsOn -> "GPS: In a vehicle" + (speed?.let { ", $it" } ?: "")
+            location.inVehicle -> "GPS: In a vehicle"
+            location.gpsOn -> "GPS: on" + (speed?.let { ", $it" } ?: ", finding satellites…")
             else -> "GPS: off"
         },
         style = MaterialTheme.typography.titleMedium,
     )
     Details(
         when {
-            location.inVehicle || location.gpsOn -> "Over 15 mph for 15 seconds confirms a vehicle."
-            else -> "Turns on for a minute or two when motion suggests a vehicle."
+            location.inVehicle || location.gpsOn ->
+                "Over 15 mph for 10 seconds confirms a vehicle. Off after 2 minutes without movement."
+            else -> "Turns on when motion looks like a vehicle or the car's Bluetooth connects."
         }
     )
     Spacer(Modifier.height(16.dp))

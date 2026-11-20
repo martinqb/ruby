@@ -14,21 +14,21 @@ class LocationRulesTest {
     // SpeedConfirmer
 
     @Test
-    fun speed_heldFor15Seconds_confirms() {
+    fun speed_heldFor10Seconds_confirms() {
         val confirmer = SpeedConfirmer()
-        for (second in 0 until 15) assertFalse(confirmer.add(mph(30f), second * 1000L))
-        assertTrue(confirmer.add(mph(30f), 15_000L))
+        for (second in 0 until 10) assertFalse(confirmer.add(mph(25f), second * 1000L))
+        assertTrue(confirmer.add(mph(25f), 10_000L))
     }
 
     @Test
     fun speed_dippingBelow15Mph_startsOver() {
         val confirmer = SpeedConfirmer()
         confirmer.add(mph(30f), 0L)
-        confirmer.add(mph(30f), 10_000L)
-        assertFalse(confirmer.add(mph(10f), 11_000L)) // slowed down at a junction
-        assertFalse(confirmer.add(mph(30f), 12_000L))
-        assertFalse(confirmer.add(mph(30f), 26_000L))
-        assertTrue(confirmer.add(mph(30f), 27_000L))
+        confirmer.add(mph(30f), 8_000L)
+        assertFalse(confirmer.add(mph(10f), 9_000L)) // slowed down at a junction
+        assertFalse(confirmer.add(mph(30f), 10_000L))
+        assertFalse(confirmer.add(mph(30f), 19_000L))
+        assertTrue(confirmer.add(mph(30f), 20_000L))
     }
 
     @Test
@@ -42,7 +42,7 @@ class LocationRulesTest {
         val confirmer = SpeedConfirmer()
         confirmer.add(mph(30f), 0L)
         confirmer.reset()
-        assertFalse(confirmer.add(mph(30f), 15_000L))
+        assertFalse(confirmer.add(mph(30f), 10_000L))
     }
 
     // PlaceMatcher

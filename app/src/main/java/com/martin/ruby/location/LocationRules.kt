@@ -12,7 +12,7 @@ const val METERS_PER_SECOND_TO_MPH = 2.23694f
 
 /**
  * Decides when GPS speed confirms you're in a vehicle: the speed has to stay at or over
- * 15 mph for 15 seconds. One fast reading (a GPS glitch, a jog) isn't enough.
+ * 15 mph for 10 seconds. One fast reading (a GPS glitch, a jog) isn't enough.
  */
 class SpeedConfirmer(
     private val minMph: Float = MIN_MPH,
@@ -36,7 +36,7 @@ class SpeedConfirmer(
 
     companion object {
         const val MIN_MPH = 15f
-        const val HOLD_MILLIS = 15_000L
+        const val HOLD_MILLIS = 10_000L
     }
 }
 
