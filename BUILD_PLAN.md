@@ -131,3 +131,38 @@ Permissions in this phase are sensitive (notifications, Do Not Disturb, health, 
 6. **Safety.** Every PC command goes through the permissions table; anything that changes files or runs code asks for a tap to confirm, and the helper keeps a log Ruby can show you.
 
 **Test:** away from home on mobile data, ask Ruby "Is my PC on?", then "Open Android Studio", and confirm both work and show up in the log.
+
+## Architecture: the full Ruby
+
+The long-term vision: Ruby is one agent with a brain at home, hands on your devices, eyes and ears, and a team of specialist agents. This section is a living sketch and will change as ideas come up.
+
+Every action on the house or the car passes the permission check before it happens.
+
+### The brain lives at home
+
+A phone can't run everything around the clock. The phone is Ruby's face and voice. A home PC or mini server is the brain: it runs Home Assistant, the memory archive, the specialist agents, and talks to Claude through the API.
+
+### Hands: devices
+
+- **Home Assistant** is the hub for the house: lights, locks, thermostat, cameras, plugs. Ruby talks to Home Assistant, not to each device. It has an official MCP server, so agents can control it directly.
+- **Car:** the key fob module (Phase 7), plus an OBD-II Bluetooth adapter to read speed, fuel and engine warnings.
+- **Internet:** web search and website access as tools Ruby can call.
+
+### Eyes and ears
+
+- **Ears:** a wake word ("Hey Ruby", for example with openWakeWord), then speech-to-text, Claude, and text-to-speech.
+- **Eyes:** frames from the phone camera or house cameras, sent to Claude to answer things like "who's at the door?"
+
+### Specialist agents
+
+Ruby is the manager. When a task needs expertise, she hands it to a specialist (coding, chemistry, research) with its own instructions and tools, then uses the result. Each specialist is a separate Claude API call. Build tools around MCP so any agent can use them.
+
+### Permission levels
+
+| Level | Examples | Rule |
+|---|---|---|
+| Free | Read news, check weather, search memory | No approval |
+| Low risk | Lights, music, thermostat | Allowed, logged |
+| High risk | Unlock doors, start the car, spend money, send messages | Always ask first |
+
+Decide how guests and family are handled before turning on always-listening mics and cameras.
