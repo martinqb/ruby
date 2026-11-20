@@ -21,6 +21,7 @@ import com.martin.ruby.data.CarSettings
 import com.martin.ruby.location.GpsReader
 import com.martin.ruby.location.LocationSensing
 import com.martin.ruby.location.LocationStatus
+import com.martin.ruby.log.SensingLog
 import com.martin.ruby.motion.Motion
 import com.martin.ruby.motion.MotionSensor
 import com.martin.ruby.motion.MotionStatus
@@ -47,6 +48,7 @@ class SensingService : Service() {
     private var motionSensor: MotionSensor? = null
     private var locationSensing: LocationSensing? = null
     private var shown = NotificationState()
+    private var lastStartMessage: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -63,13 +65,24 @@ class SensingService : Service() {
             (startedFromApp || GpsReader.hasBackgroundLocation(this))
 
         // Android requires this within a few seconds of every start.
-        val usingLocation = when {
-            wantLocation && startInForeground(withLocation = true) -> true
-            startInForeground(withLocation = false) -> false
-            else -> {
+        val locationError = if (wantLocation) startInForeground(withLocation = true) else "not wanted"
+        if (locationError != null) {
+            val error = startInForeground(withLocation = false)
+            if (error != null) {
+                SensingLog.add("Service couldn't start: $error")
                 stopSelf()
                 return START_NOT_STICKY
             }
+        }
+        val startMessage = "Service running" +
+            if (locationError == null) " with location access." else when {
+                !GpsReader.hasFineLocation(this) -> ". Precise location isn't allowed."
+                !wantLocation -> " without location access: \"Allow all the time\" is off and Ruby wasn't open."
+                else -> ". Android refused location access: $locationError"
+            }
+        if (startMessage != lastStartMessage) {
+            lastStartMessage = startMessage
+            SensingLog.add(startMessage)
         }
 
         if (watchJob == null) {
@@ -105,8 +118,16 @@ class SensingService : Service() {
         val sensor = motionSensor ?: MotionSensor(this).also { motionSensor = it }
         sensor.start()
 
-        if (usingLocation && locationSensing == null) {
+        // Start GPS sensing whenever precise location is allowed. This used to wait for the
+        // service's "location" type to be accepted, and if Android refused that, GPS never
+        // started and nothing said why. Now any problem shows up in the log when GPS is tried.
+        if (GpsReader.hasFineLocation(this) && locationSensing == null) {
             locationSensing = LocationSensing(this, scope).also { it.start() }
+        }
+
+        if (intent?.action == BackgroundSensing.ACTION_TEST_GPS) {
+            locationSensing?.testNow()
+                ?: SensingLog.add("Test: GPS sensing isn't running because precise location isn't allowed.")
         }
 
         // If Android does stop the service to free memory, it restarts it when it can.
@@ -120,17 +141,20 @@ class SensingService : Service() {
         super.onDestroy()
     }
 
-    /** Shows the ongoing notification and declares what the service uses. */
-    private fun startInForeground(withLocation: Boolean): Boolean {
+    /**
+     * Shows the ongoing notification and declares what the service uses.
+     * Returns null if it worked, or Android's reason if it didn't.
+     */
+    private fun startInForeground(withLocation: Boolean): String? {
         var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
         if (withLocation) types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
         return try {
             ServiceCompat.startForeground(this, NOTIFICATION_ID, buildNotification(shown), types)
-            true
+            null
         } catch (e: Exception) {
             // For example, the Bluetooth permission was turned off in Settings (Android 14+
             // requires it for this kind of service), or Android blocked a background start.
-            false
+            "${e.javaClass.simpleName}: ${e.message}"
         }
     }
 

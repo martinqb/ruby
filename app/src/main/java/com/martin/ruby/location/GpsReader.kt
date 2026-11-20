@@ -31,11 +31,19 @@ class GpsReader(private val context: Context) {
             manager.isProviderEnabled(LocationManager.GPS_PROVIDER)
     }
 
-    /** Starts a GPS reading every second. Returns false if GPS can't be used right now. */
+    /**
+     * Starts a GPS reading every second.
+     * Returns null if it started, or the reason it couldn't (shown in the log).
+     */
     @SuppressLint("MissingPermission") // checked by hasFineLocation()
-    fun startUpdates(onFix: (Location) -> Unit): Boolean {
-        val manager = locationManager ?: return false
-        if (!hasFineLocation(context) || !isGpsOn()) return false
+    fun startUpdates(onFix: (Location) -> Unit): String? {
+        val manager = locationManager ?: return "This phone has no location service."
+        if (!hasFineLocation(context)) return "Precise location isn't allowed."
+        if (!LocationManagerCompat.isLocationEnabled(manager)) {
+            return "Location is turned off in Android's settings."
+        }
+        if (!manager.allProviders.contains(LocationManager.GPS_PROVIDER)) return "This phone has no GPS."
+        if (!manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) return "GPS is turned off."
         stopUpdates()
 
         val newListener = object : LocationListenerCompat {
@@ -49,9 +57,10 @@ class GpsReader(private val context: Context) {
                 manager, LocationManager.GPS_PROVIDER, request, newListener, Looper.getMainLooper()
             )
             listener = newListener
-            true
-        } catch (e: SecurityException) {
-            false
+            null
+        } catch (e: Exception) {
+            // For example, Android refused location access for a background service.
+            "Android refused: ${e.javaClass.simpleName}: ${e.message}"
         }
     }
 
@@ -83,7 +92,7 @@ class GpsReader(private val context: Context) {
                 ContextCompat.getMainExecutor(context),
             ) { location -> onResult(location) }
             cancel
-        } catch (e: SecurityException) {
+        } catch (e: Exception) {
             onResult(null)
             null
         }

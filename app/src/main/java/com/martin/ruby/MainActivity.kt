@@ -30,6 +30,7 @@ import com.martin.ruby.data.Place
 import com.martin.ruby.data.PlaceStore
 import com.martin.ruby.location.GpsReader
 import com.martin.ruby.location.LocationStatus
+import com.martin.ruby.log.SensingLog
 import com.martin.ruby.motion.MotionSensor
 import com.martin.ruby.motion.MotionStatus
 import com.martin.ruby.sensing.BackgroundSensing
@@ -86,6 +87,7 @@ class MainActivity : ComponentActivity() {
                 val motion by MotionStatus.reading.collectAsState()
                 val location by LocationStatus.reading.collectAsState()
                 val places by placeStore.places.collectAsState(initial = emptyList())
+                val log by SensingLog.entries.collectAsState()
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
 
                 if (screen != Screen.MAIN) BackHandler { screen = Screen.MAIN }
@@ -138,6 +140,7 @@ class MainActivity : ComponentActivity() {
                                 gpsEnabled = gpsEnabled,
                                 backgroundSensing = backgroundSensing,
                                 batteryOptimized = batteryOptimized,
+                                log = log,
                             ),
                             actions = MainActions(
                                 onRequestPermissions = ::requestPermissions,
@@ -147,6 +150,8 @@ class MainActivity : ComponentActivity() {
                                 onAllowLocation = ::requestLocation,
                                 onAllowLocationAllTheTime = ::requestBackgroundLocation,
                                 onOpenPlaces = { screen = Screen.PLACES },
+                                onTestGps = { BackgroundSensing.testGps(this) },
+                                onClearLog = SensingLog::clear,
                             ),
                             modifier = modifier,
                         )

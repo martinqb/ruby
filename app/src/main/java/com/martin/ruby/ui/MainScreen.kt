@@ -17,19 +17,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.martin.ruby.data.Car
 import com.martin.ruby.location.LocationReading
+import com.martin.ruby.log.LogEntry
 import com.martin.ruby.motion.Motion
 import com.martin.ruby.motion.MotionReading
 import com.martin.ruby.motion.Rhythm
 import com.martin.ruby.ui.theme.RubyTheme
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** Everything the main screen shows. */
 data class MainUiState(
@@ -45,6 +52,7 @@ data class MainUiState(
     val gpsEnabled: Boolean = true,
     val backgroundSensing: Boolean = true,
     val batteryOptimized: Boolean = false,
+    val log: List<LogEntry> = emptyList(),
 )
 
 /** Everything the user can do from the main screen. */
@@ -56,6 +64,8 @@ data class MainActions(
     val onAllowLocation: () -> Unit = {},
     val onAllowLocationAllTheTime: () -> Unit = {},
     val onOpenPlaces: () -> Unit = {},
+    val onTestGps: () -> Unit = {},
+    val onClearLog: () -> Unit = {},
 )
 
 /** The home screen: what Ruby senses at the top, setup below. */
@@ -164,6 +174,45 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
                 actions.onAllowBackground,
             )
         }
+
+        Spacer(Modifier.height(24.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+        SensingLogSection(state, actions)
+    }
+}
+
+/** The on-screen log: what sensing and GPS have been doing, newest first. */
+@Composable
+private fun SensingLogSection(state: MainUiState, actions: MainActions) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Log", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        if (state.hasLocationPermission) {
+            TextButton(onClick = actions.onTestGps) { Text("Test GPS now") }
+        }
+        TextButton(onClick = actions.onClearLog, enabled = state.log.isNotEmpty()) { Text("Clear") }
+    }
+    if (state.log.isEmpty()) {
+        Details("Nothing yet. GPS checks, speeds and errors will show up here.")
+        return
+    }
+    val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    Column(Modifier.fillMaxWidth()) {
+        state.log.forEach { entry ->
+            Row(Modifier.padding(vertical = 2.dp)) {
+                Text(
+                    text = timeFormat.format(Date(entry.timeMillis)),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(entry.message, style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
 
@@ -260,6 +309,12 @@ private fun MainScreenPreview() {
                 hasLocationPermission = true,
                 hasBackgroundLocation = false,
                 batteryOptimized = true,
+                log = listOf(
+                    LogEntry(1_700_000_030_000, "Over 15 mph for 15 s: in a vehicle. GPS off."),
+                    LogEntry(1_700_000_020_000, "Speed 31 mph ±5 m."),
+                    LogEntry(1_700_000_010_000, "First GPS fix."),
+                    LogEntry(1_700_000_000_000, "GPS on (motion suggests a vehicle). Checking speed."),
+                ),
             ),
             actions = MainActions(),
         )
