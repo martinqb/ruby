@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import com.martin.ruby.data.Car
 import com.martin.ruby.motion.Motion
 import com.martin.ruby.motion.MotionReading
+import com.martin.ruby.motion.Rhythm
 import com.martin.ruby.ui.theme.RubyTheme
 
 /** The home screen: shows Driving or Not driving, plus buttons to set things up. */
@@ -138,6 +139,8 @@ private fun MotionInfo(reading: MotionReading?) {
             append("Variation %.2f m/s²".format(reading.variation))
             append(" · ")
             append(reading.stepsPerSecond?.let { "%.1f steps/s".format(it) } ?: "no step counter")
+            append("\nRhythm %.2f".format(reading.rhythm.strength))
+            reading.rhythm.perSecond?.let { append(" at %.1f beats/s".format(it)) }
         }
     }
     Text(
@@ -162,7 +165,12 @@ private fun MainScreenPreview() {
             onBackgroundSensingChange = {},
             batteryOptimized = true,
             onAllowBackground = {},
-            motion = MotionReading(Motion.IN_VEHICLE, variation = 0.62f, stepsPerSecond = 0f),
+            motion = MotionReading(
+                Motion.WALKING,
+                variation = 0.74f,
+                stepsPerSecond = 0.4f,
+                rhythm = Rhythm(strength = 0.68f, perSecond = 1.4f),
+            ),
             hasActivityPermission = true,
         )
     }

@@ -41,6 +41,12 @@ class MotionSensor(private val context: Context) : SensorEventListener {
     private var windowStartNanos = 0L
     private var stepsInWindow = 0
 
+    // The window before, so steps can be counted over 10 seconds.
+    private var previousSteps = 0
+    private var previousSeconds = 0f
+
+    private val smoother = MotionSmoother()
+
     /** How many windows in a row had no walking or vehicle motion. */
     private var quietWindows = 0
 
@@ -57,11 +63,14 @@ class MotionSensor(private val context: Context) : SensorEventListener {
         if (sleeping || accelerometer == null) return
 
         if (!listening) {
-            listening = sensorManager.registerListener(
-                this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL
-            )
+            // 20 readings a second. SENSOR_DELAY_NORMAL (about 5) is too slow to see a
+            // footstep rhythm of 1 to 3 beats a second clearly.
+            listening = sensorManager.registerListener(this, accelerometer, ACCEL_PERIOD_US)
             resetWindow()
+            previousSteps = 0
+            previousSeconds = 0f
             quietWindows = 0
+            smoother.reset()
             keepAwake()
         }
         if (listening && !countingSteps && stepDetector != null && hasActivityPermission(context)) {
@@ -101,12 +110,23 @@ class MotionSensor(private val context: Context) : SensorEventListener {
 
     private fun finishWindow(seconds: Float) {
         val variation = MotionClassifier.variation(magnitudes)
-        val stepsPerSecond = if (countingSteps) stepsInWindow / seconds else null
-        val motion = MotionClassifier.classify(variation, stepsPerSecond)
-        MotionStatus.update(MotionReading(motion, variation, stepsPerSecond))
+        val rhythm = MotionClassifier.rhythm(magnitudes, samplesPerSecond = magnitudes.size / seconds)
+        // Count steps over the last 10 seconds, not 5: the step detector often reports
+        // steps late, so a single window can look emptier than it really was.
+        val stepsPerSecond = if (countingSteps) {
+            (stepsInWindow + previousSteps) / (seconds + previousSeconds)
+        } else {
+            null
+        }
+        previousSteps = stepsInWindow
+        previousSeconds = seconds
+
+        val raw = MotionClassifier.classify(variation, stepsPerSecond, rhythm)
+        val motion = smoother.smooth(raw)
+        MotionStatus.update(MotionReading(motion, variation, stepsPerSecond, rhythm))
         resetWindow()
 
-        if (motion == Motion.WALKING || motion == Motion.IN_VEHICLE) {
+        if (raw == Motion.WALKING || raw == Motion.IN_VEHICLE) {
             quietWindows = 0
         } else {
             quietWindows++
@@ -151,6 +171,7 @@ class MotionSensor(private val context: Context) : SensorEventListener {
 
     companion object {
         private const val WINDOW_NANOS = 5_000_000_000L // 5 seconds
+        private const val ACCEL_PERIOD_US = 50_000 // 50 ms between readings = 20 a second
         private const val QUIET_WINDOWS_BEFORE_SLEEP = 24 // 24 x 5 s = 2 minutes
         private const val WAKE_LOCK_TIMEOUT_MS = 60_000L
 
