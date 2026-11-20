@@ -104,6 +104,36 @@ Be upfront in the privacy policy: each message and its memory snippets still go 
 
 **Test:** press "Start car" in the app from inside the house and watch the hazard lights flash before the engine starts.
 
+### Phase 8: Phone-only superpowers
+
+**Goal:** make Ruby useful every day with features that need nothing but the phone. Each one reuses what Phases 1-6 already built, so add them in any order once those work.
+
+1. **Proactive daily briefing.** Each morning, Ruby builds a short briefing: weather, today's calendar, open reminders. When Bluetooth detects the car, she reads it aloud with Android's text-to-speech. Schedule it with WorkManager; read the calendar through `CalendarContract` (`READ_CALENDAR` permission).
+2. **Notification triage.** A `NotificationListenerService` (the user turns it on in Settings) lets Ruby read incoming notifications. She sends short summaries to Claude to rank them, shows only the important ones, and while Driving holds everything except calls from chosen people.
+3. **Context modes.** When the state from the decision engine changes, Ruby changes the phone: silent at work, a driving mode in the car, quiet hours at night. Use `NotificationManager` Do Not Disturb (needs the user to grant DND access) and `AudioManager` for volume.
+4. **Location reminders.** "Remind me to buy milk next time I'm near the store." Ruby saves the place and the note, adds a geofence from Phase 4, and posts a notification on arrival. Store reminders in the Room database from Phase 6.
+5. **Screen awareness.** Ask "what's this?" or "save this" about whatever is on screen. The simplest route is Android's screenshot share: share a screenshot to Ruby, she sends it to Claude and files the answer in memory. An `AccessibilityService` can read screen text directly, but Google Play reviews those apps strictly, so start with sharing.
+6. **Health and sleep insights.** Read steps, sleep and heart rate from Health Connect (each data type needs its own permission). Ruby looks for patterns, for example worse sleep after late nights, and mentions them in the weekly reflection. Keep health data on the phone like the chat archive.
+7. **Acting inside apps.** Go beyond opening apps: send a text, start navigation to a saved place, play a playlist. Start with Android intents (an SMS intent, a `google.navigation:` intent, a media search intent). Watch for newer Android features that let apps expose actions to AI agents, and add them as they become available.
+8. **Weekly reflection.** Every Sunday, Ruby summarizes the week from her memory: places visited, time driving, what you talked about, and anything still open. Run it with WorkManager and save the summary as its own memory entry.
+
+Permissions in this phase are sensitive (notifications, Do Not Disturb, health, accessibility). Ask for each one only when its feature is first turned on, with a one-line reason, and list them all on Ruby's privacy screen.
+
+**Test:** for one week, start each day with the briefing, check that context modes switch on their own, set two location reminders, and read the Sunday reflection.
+
+### Phase 9: PC link (remote access to the home computer)
+
+**Goal:** from anywhere, Ruby can reach the home PC to check on it, run tasks, and help work on projects like Android Studio.
+
+1. **Now, no code.** Install Chrome Remote Desktop on the PC and phone, so you can see and control the PC from anywhere. Set the PC to never sleep while plugged in.
+2. **Private network.** Install Tailscale on the PC and phone. It gives both devices a private address that works from any network, with no ports opened on the router.
+3. **PC helper.** A small program on the PC that listens only on the Tailscale address and accepts a short list of commands: status, wake check, open an app, start a build, run a Claude Code task in a project folder.
+4. **Ruby side.** Add a "PC" tool so you can say "Is my PC on?" or "Start a build of Ruby" and get the result back in chat.
+5. **Wake on LAN.** Let Ruby wake the PC if it's asleep, through a device that stays on at home.
+6. **Safety.** Every PC command goes through the permissions table; anything that changes files or runs code asks for a tap to confirm, and the helper keeps a log Ruby can show you.
+
+**Test:** away from home on mobile data, ask Ruby "Is my PC on?", then "Open Android Studio", and confirm both work and show up in the log.
+
 ## Architecture: the full Ruby
 
 The long-term vision: Ruby is one agent with a brain at home, hands on your devices, eyes and ears, and a team of specialist agents. This section is a living sketch and will change as ideas come up.
