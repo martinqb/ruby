@@ -24,6 +24,16 @@ class CarSettings(private val context: Context) {
         val CAR_ADDRESS = stringPreferencesKey("car_address")
         val CAR_NAME = stringPreferencesKey("car_name")
         val CAR_CONNECTED = booleanPreferencesKey("car_connected")
+        val BACKGROUND_SENSING = booleanPreferencesKey("background_sensing")
+    }
+
+    /** Whether Ruby keeps sensing when the app is closed. On by default. */
+    val backgroundSensing: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.BACKGROUND_SENSING] ?: true
+    }
+
+    suspend fun setBackgroundSensing(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[Keys.BACKGROUND_SENSING] = enabled }
     }
 
     /** The chosen car, or null if the user hasn't picked one yet. */

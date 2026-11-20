@@ -10,6 +10,10 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import com.martin.ruby.data.Car
+import com.martin.ruby.data.CarSettings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /** Small helpers for the Bluetooth calls the app needs. */
 object CarBluetooth {
@@ -34,6 +38,19 @@ object CarBluetooth {
                 .sortedBy { it.name.lowercase() }
         } catch (e: SecurityException) {
             emptyList()
+        }
+    }
+
+    /**
+     * Checks whether the saved car is connected right now and saves the answer.
+     * [scope] must run on the main thread.
+     */
+    fun refreshSavedState(context: Context, settings: CarSettings, scope: CoroutineScope) {
+        scope.launch {
+            val car = settings.car.first() ?: return@launch
+            checkConnectedNow(context, car.address) { connected ->
+                scope.launch { settings.setCarConnected(connected) }
+            }
         }
     }
 
