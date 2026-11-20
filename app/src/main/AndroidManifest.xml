@@ -23,6 +23,14 @@
     <!-- Keeps the processor awake while moving, so no sensor readings are missed. -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Phase 4: GPS to confirm a vehicle and recognize saved places. -->
+    <!-- Android asks for approximate and precise together; GPS needs precise. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Optional "Allow all the time", asked for separately. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -59,7 +67,7 @@
         <service
             android:name=".sensing.SensingService"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice" />
+            android:foregroundServiceType="connectedDevice|location" />
 
         <!-- Restarts the service after the phone reboots or Ruby is updated. -->
         <receiver

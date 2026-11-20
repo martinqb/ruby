@@ -9,12 +9,19 @@ import com.martin.ruby.bluetooth.CarBluetooth
 /** Starts and stops the background service, and checks battery settings. */
 object BackgroundSensing {
 
-    /** Starts the service if Ruby has the Bluetooth permission it needs. Safe to call again. */
-    fun start(context: Context) {
+    /** Tells the service it was started while Ruby was on screen, so it may use GPS. */
+    const val EXTRA_FROM_APP = "com.martin.ruby.FROM_APP"
+
+    /**
+     * Starts the service if Ruby has the Bluetooth permission it needs. Safe to call again.
+     * Pass [fromApp] = true only when Ruby is on screen.
+     */
+    fun start(context: Context, fromApp: Boolean = false) {
         if (!CarBluetooth.hasPermission(context)) return
         try {
             ContextCompat.startForegroundService(
-                context, Intent(context, SensingService::class.java)
+                context,
+                Intent(context, SensingService::class.java).putExtra(EXTRA_FROM_APP, fromApp),
             )
         } catch (e: IllegalStateException) {
             // Android 12+ blocks starting from the background in some cases. The service
