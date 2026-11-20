@@ -26,6 +26,8 @@ import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.martin.ruby.bluetooth.CarBluetooth
 import com.martin.ruby.data.CarSettings
+import com.martin.ruby.motion.MotionSensor
+import com.martin.ruby.motion.MotionStatus
 import com.martin.ruby.sensing.BackgroundSensing
 import com.martin.ruby.ui.CarPickerScreen
 import com.martin.ruby.ui.MainScreen
@@ -40,10 +42,12 @@ class MainActivity : ComponentActivity() {
     // Compose redraws the screen whenever these change.
     private var hasBluetoothPermission by mutableStateOf(false)
     private var batteryOptimized by mutableStateOf(false)
+    private var hasActivityPermission by mutableStateOf(false)
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             hasBluetoothPermission = CarBluetooth.hasPermission(this)
+            hasActivityPermission = MotionSensor.hasActivityPermission(this)
             refreshCarState()
             startSensingIfEnabled()
         }
@@ -52,9 +56,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         settings = CarSettings(applicationContext)
         hasBluetoothPermission = CarBluetooth.hasPermission(this)
+        hasActivityPermission = MotionSensor.hasActivityPermission(this)
 
-        // Ask the first time the app opens.
-        if (savedInstanceState == null && !hasBluetoothPermission) requestPermissions()
+        // Ask the first time the app opens (or the first time after an update adds a permission).
+        if (savedInstanceState == null && (!hasBluetoothPermission || !hasActivityPermission)) {
+            requestPermissions()
+        }
 
         enableEdgeToEdge()
         setContent {
@@ -62,6 +69,7 @@ class MainActivity : ComponentActivity() {
                 val car by settings.car.collectAsState(initial = null)
                 val carConnected by settings.carConnected.collectAsState(initial = false)
                 val backgroundSensing by settings.backgroundSensing.collectAsState(initial = true)
+                val motion by MotionStatus.reading.collectAsState()
                 var showCarPicker by rememberSaveable { mutableStateOf(false) }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -92,6 +100,8 @@ class MainActivity : ComponentActivity() {
                             onBackgroundSensingChange = ::setBackgroundSensing,
                             batteryOptimized = batteryOptimized,
                             onAllowBackground = ::askToIgnoreBatteryOptimization,
+                            motion = motion,
+                            hasActivityPermission = hasActivityPermission,
                             modifier = Modifier.padding(innerPadding),
                         )
                     }
@@ -105,14 +115,16 @@ class MainActivity : ComponentActivity() {
         // The user may have changed a permission or battery setting, or the car may have
         // connected while Ruby was closed, so check again whenever the screen comes back.
         hasBluetoothPermission = CarBluetooth.hasPermission(this)
+        hasActivityPermission = MotionSensor.hasActivityPermission(this)
         batteryOptimized = BackgroundSensing.isBatteryOptimized(this)
         refreshCarState()
         startSensingIfEnabled()
     }
 
-    /** Bluetooth (Android 12+) and notifications (Android 13+), asked together. */
+    /** Physical activity, Bluetooth (Android 12+) and notifications (Android 13+), asked together. */
     private fun requestPermissions() {
         val permissions = buildList {
+            add(Manifest.permission.ACTIVITY_RECOGNITION)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 add(Manifest.permission.BLUETOOTH_CONNECT)
             }
@@ -120,7 +132,7 @@ class MainActivity : ComponentActivity() {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
-        if (permissions.isNotEmpty()) permissionLauncher.launch(permissions.toTypedArray())
+        permissionLauncher.launch(permissions.toTypedArray())
     }
 
     private fun refreshCarState() {
