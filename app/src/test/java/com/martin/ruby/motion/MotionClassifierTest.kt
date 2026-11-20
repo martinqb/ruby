@@ -42,6 +42,17 @@ class MotionClassifierTest {
     }
 
     @Test
+    fun handHeldSlowWalking_weakRhythmGentleShaking_isWalking() {
+        assertEquals(Motion.WALKING, MotionClassifier.classify(0.25f, 0f, Rhythm(0.38f, 1.2f)))
+    }
+
+    @Test
+    fun weakRhythm_isNotVehicle() {
+        // Too weak to call walking, but too rhythmic to call a vehicle.
+        assertEquals(Motion.UNKNOWN, MotionClassifier.classify(0.5f, 0f, Rhythm(0.3f, 1.2f)))
+    }
+
+    @Test
     fun rhythmWithTinyShaking_isNotWalking() {
         assertEquals(Motion.STILL, MotionClassifier.classify(0.1f, 0f, walkingRhythm))
     }
@@ -115,11 +126,29 @@ class MotionClassifierTest {
     }
 
     @Test
+    fun rhythm_findsHandHeldWalking_throughJitterAndDrift() {
+        // 10 s of slow walking with the phone in a hand: a weak 1.2/s bounce, hand jitter
+        // bigger than the bounce, and the arm slowly rising and falling.
+        val random = Random(11)
+        val samples = List(200) { i ->
+            val t = i / 20.0
+            (9.81 + 0.3 * sin(2 * PI * 1.2 * t) + 0.5 * sin(2 * PI * 0.2 * t) +
+                1.0 * (random.nextDouble() - 0.5)).toFloat()
+        }
+        val rhythm = MotionClassifier.rhythm(samples, samplesPerSecond = 20f)
+        assertTrue("strength ${rhythm.strength}", rhythm.strength >= MotionClassifier.WALKING_MIN_RHYTHM)
+        assertEquals(1.2f, rhythm.perSecond!!, 0.15f)
+    }
+
+    @Test
     fun rhythm_ofRandomVibration_isWeak() {
-        val random = Random(7)
-        val roadNoise = List(100) { (9.81 + 0.6 * (random.nextDouble() - 0.5)).toFloat() }
-        val rhythm = MotionClassifier.rhythm(roadNoise, samplesPerSecond = 20f)
-        assertTrue("strength ${rhythm.strength}", rhythm.strength < MotionClassifier.VEHICLE_MAX_RHYTHM)
+        // 10 s of car-like vibration should look rhythm-free, whatever the random seed.
+        for (seed in 1..20) {
+            val random = Random(seed)
+            val roadNoise = List(200) { (9.81 + 0.6 * (random.nextDouble() - 0.5)).toFloat() }
+            val rhythm = MotionClassifier.rhythm(roadNoise, samplesPerSecond = 20f)
+            assertTrue("seed $seed strength ${rhythm.strength}", rhythm.strength < MotionClassifier.VEHICLE_MAX_RHYTHM)
+        }
     }
 
     @Test

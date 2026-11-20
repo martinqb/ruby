@@ -41,7 +41,8 @@ class MotionSensor(private val context: Context) : SensorEventListener {
     private var windowStartNanos = 0L
     private var stepsInWindow = 0
 
-    // The window before, so steps can be counted over 10 seconds.
+    // The window before, so steps and rhythm can be measured over 10 seconds.
+    private var previousMagnitudes = emptyList<Float>()
     private var previousSteps = 0
     private var previousSeconds = 0f
 
@@ -67,6 +68,7 @@ class MotionSensor(private val context: Context) : SensorEventListener {
             // footstep rhythm of 1 to 3 beats a second clearly.
             listening = sensorManager.registerListener(this, accelerometer, ACCEL_PERIOD_US)
             resetWindow()
+            previousMagnitudes = emptyList()
             previousSteps = 0
             previousSeconds = 0f
             quietWindows = 0
@@ -110,7 +112,14 @@ class MotionSensor(private val context: Context) : SensorEventListener {
 
     private fun finishWindow(seconds: Float) {
         val variation = MotionClassifier.variation(magnitudes)
-        val rhythm = MotionClassifier.rhythm(magnitudes, samplesPerSecond = magnitudes.size / seconds)
+        // Look for a footstep rhythm over the last 10 seconds: more steps to line up makes a
+        // weak beat (phone in your hand) much easier to tell apart from random vibration.
+        val rhythmSamples = previousMagnitudes + magnitudes
+        val rhythm = MotionClassifier.rhythm(
+            rhythmSamples,
+            samplesPerSecond = rhythmSamples.size / (seconds + previousSeconds),
+        )
+        previousMagnitudes = magnitudes.toList()
         // Count steps over the last 10 seconds, not 5: the step detector often reports
         // steps late, so a single window can look emptier than it really was.
         val stepsPerSecond = if (countingSteps) {
