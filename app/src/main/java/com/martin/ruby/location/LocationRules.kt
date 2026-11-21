@@ -13,30 +13,59 @@ const val METERS_PER_SECOND_TO_MPH = 2.23694f
 /**
  * Decides when GPS speed confirms you're in a vehicle: the speed has to stay at or over
  * 15 mph for 10 seconds. One fast reading (a GPS glitch, a jog) isn't enough.
+ *
+ * Short dips under 15 mph (a noisy reading, slowing for a bend) are tolerated: the count
+ * only starts over once the speed has stayed under 15 mph for more than [graceMillis].
+ * The time spent in a tolerated dip still counts toward the 10 seconds.
+ *
+ * [log] is told when a dip starts, is tolerated, or resets the count.
  */
 class SpeedConfirmer(
     private val minMph: Float = MIN_MPH,
     private val holdMillis: Long = HOLD_MILLIS,
+    private val graceMillis: Long = DIP_GRACE_MILLIS,
+    private val log: (String) -> Unit = {},
 ) {
     private var fastSinceMillis: Long? = null
+    private var slowSinceMillis: Long? = null
 
     /** Adds one GPS reading. Returns true once the speed has been held long enough. */
     fun add(speedMetersPerSecond: Float, timeMillis: Long): Boolean {
-        if (speedMetersPerSecond * METERS_PER_SECOND_TO_MPH < minMph) {
-            fastSinceMillis = null
+        val mph = speedMetersPerSecond * METERS_PER_SECOND_TO_MPH
+        val since = fastSinceMillis
+
+        if (mph < minMph) {
+            if (since == null) return false   // not counting, nothing to tolerate
+            val slowSince = slowSinceMillis ?: timeMillis.also {
+                slowSinceMillis = it
+                log("Speed dipped to %.0f mph; tolerating up to %d s.".format(mph, graceMillis / 1000))
+            }
+            if (timeMillis - slowSince > graceMillis) {
+                log("Under %.0f mph for over %d s: vehicle count reset.".format(minMph, graceMillis / 1000))
+                reset()
+            }
             return false
         }
-        val since = fastSinceMillis ?: timeMillis.also { fastSinceMillis = it }
-        return timeMillis - since >= holdMillis
+
+        slowSinceMillis?.let { slowSince ->
+            log("Dip tolerated (%.0f s under %.0f mph); still counting.".format((timeMillis - slowSince) / 1000f, minMph))
+            slowSinceMillis = null
+        }
+        val start = since ?: timeMillis.also { fastSinceMillis = it }
+        return timeMillis - start >= holdMillis
     }
 
     fun reset() {
         fastSinceMillis = null
+        slowSinceMillis = null
     }
 
     companion object {
         const val MIN_MPH = 15f
         const val HOLD_MILLIS = 10_000L
+
+        /** A dip under [MIN_MPH] has to last longer than this to start the count over. */
+        const val DIP_GRACE_MILLIS = 3_000L
     }
 }
 

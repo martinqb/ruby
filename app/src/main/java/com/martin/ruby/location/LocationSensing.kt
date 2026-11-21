@@ -27,7 +27,12 @@ import java.util.Date
  * GPS turns on:
  *  - at the first 5-second motion reading that looks like a vehicle, or
  *  - as soon as the phone connects to the car's Bluetooth (so it's warm before you move).
- * While on, it reads the speed every second. 10 seconds over 15 mph means "In a vehicle".
+ * While on, it reads the speed every second. 10 seconds over 15 mph means "In a vehicle"
+ * (dips under 15 mph of up to 3 seconds are tolerated, see [SpeedConfirmer]).
+ *
+ * "In a vehicle" is sticky. A single footstep-like bump doesn't end it; it only ends when:
+ *  - there's been no movement for 2 minutes (or the phone is still and the sensors pause), or
+ *  - the motion sensors report walking for 30 seconds in a row, with no GPS speed over 5 mph.
  *
  * To save battery, GPS turns off again after 2 minutes without movement (no vehicle-like
  * motion and no GPS speed over 5 mph), straight away once the motion sensors pause because
@@ -41,13 +46,16 @@ import java.util.Date
 class LocationSensing(private val context: Context, private val scope: CoroutineScope) {
 
     private val gps = GpsReader(context)
-    private val speedConfirmer = SpeedConfirmer()
+    private val speedConfirmer = SpeedConfirmer(log = SensingLog::add)
     private val jobs = mutableListOf<Job>()
 
     private var places = emptyList<Place>()
     private var lastMotion: Motion? = null
     private var lastPlaceCheckAt = Long.MIN_VALUE / 2
     private var pendingFix: CancellationSignal? = null
+
+    /** While in a vehicle: when continuous walking started (the leave timer), or null. */
+    private var walkingSinceAt: Long? = null
 
     // While GPS is on.
     private var watchJob: Job? = null
@@ -97,6 +105,7 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
         watchJob?.cancel()
         gps.stopUpdates()
         pendingFix?.cancel()
+        walkingSinceAt = null
         LocationStatus.reset()
     }
 
@@ -119,6 +128,8 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
         lastMotion = motion
         if (changed) SensingLog.add("Motion: ${motion.label}${if (reading.paused) " (sensors paused)" else ""}.")
 
+        checkWalkingAway(reading, now)
+
         when {
             // GPS says we're moving: trust it over the motion sensors. A phone in a mount on
             // a smooth road can feel "still", and a bump can look like a footstep.
@@ -129,7 +140,6 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
                 if (gps.isRunning) stopGps("Phone still for 2 minutes.")
                 leaveVehicle("Phone still for a while")
             }
-            reading.raw == Motion.WALKING -> leaveVehicle("Walking")
             // Use the raw reading: the smoothed one waits 15 s before saying "vehicle".
             reading.raw == Motion.IN_VEHICLE -> {
                 lastMovementAt = now
@@ -148,7 +158,40 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
     private fun movingByGps(now: Long): Boolean =
         gps.isRunning && now - lastGpsMovementAt <= GPS_MOVEMENT_TRUST_MS
 
+    /**
+     * The leave timer: while in a vehicle, walking has to last [WALK_OUT_MS] without a break
+     * (and without GPS showing over 5 mph, see [onFix]) before we say you've left it.
+     */
+    private fun checkWalkingAway(reading: MotionReading, now: Long) {
+        if (!LocationStatus.reading.value.inVehicle) {
+            walkingSinceAt = null
+            return
+        }
+        val since = walkingSinceAt
+        if (reading.paused || reading.raw != Motion.WALKING) {
+            if (since != null) {
+                walkingSinceAt = null
+                SensingLog.add("Walking stopped after ${(now - since) / 1000} s (now ${reading.raw.label}): leave timer cancelled, still in a vehicle.")
+            }
+            return
+        }
+        if (since == null) {
+            // GPS showed movement in the last 15 s: a bump on the road, not footsteps.
+            if (movingByGps(now)) return
+            walkingSinceAt = now
+            SensingLog.add(
+                "Walking while in a vehicle: leaving if it lasts %d s with GPS under %.0f mph."
+                    .format(WALK_OUT_MS / 1000, MOVING_MPH)
+            )
+            return
+        }
+        if (now - since >= WALK_OUT_MS) {
+            leaveVehicle("Walking for %d s with GPS under %.0f mph".format((now - since) / 1000, MOVING_MPH))
+        }
+    }
+
     private fun leaveVehicle(why: String) {
+        walkingSinceAt = null
         if (!LocationStatus.reading.value.inVehicle) return
         SensingLog.add("$why: no longer in a vehicle.")
         LocationStatus.update { it.copy(inVehicle = false) }
@@ -235,6 +278,13 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
         if (mph >= MOVING_MPH) {
             lastMovementAt = now
             lastGpsMovementAt = now
+            walkingSinceAt?.let { since ->
+                walkingSinceAt = null
+                SensingLog.add(
+                    "GPS shows %.0f mph after %d s of walking: leave timer cancelled, still in a vehicle."
+                        .format(mph, (now - since) / 1000)
+                )
+            }
         }
 
         if (speedConfirmer.add(speed, now) && !LocationStatus.reading.value.inVehicle) {
@@ -291,6 +341,7 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
         const val STILL_OFF_MS = 2 * 60_000L           // GPS off after 2 minutes without movement
         const val MOVING_MPH = 5f                      // GPS speed that counts as movement
         const val GPS_MOVEMENT_TRUST_MS = 15_000L      // GPS movement this recent beats the motion sensors
+        const val WALK_OUT_MS = 30_000L                // walking this long (GPS under 5 mph) ends "in a vehicle"
         const val NO_FIX_GIVE_UP_MS = 3 * 60_000L      // give up if no fix at all in 3 minutes
         const val RETRY_MS = 60_000L                   // then wait a minute before trying again
         const val WATCH_EVERY_MS = 5_000L

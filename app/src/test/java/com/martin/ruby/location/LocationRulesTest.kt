@@ -21,14 +21,36 @@ class LocationRulesTest {
     }
 
     @Test
-    fun speed_dippingBelow15Mph_startsOver() {
+    fun speed_shortDipBelow15Mph_isTolerated() {
         val confirmer = SpeedConfirmer()
         confirmer.add(mph(30f), 0L)
-        confirmer.add(mph(30f), 8_000L)
-        assertFalse(confirmer.add(mph(10f), 9_000L)) // slowed down at a junction
-        assertFalse(confirmer.add(mph(30f), 10_000L))
-        assertFalse(confirmer.add(mph(30f), 19_000L))
-        assertTrue(confirmer.add(mph(30f), 20_000L))
+        confirmer.add(mph(30f), 5_000L)
+        assertFalse(confirmer.add(mph(10f), 6_000L)) // one noisy reading
+        assertFalse(confirmer.add(mph(12f), 7_000L))
+        assertFalse(confirmer.add(mph(12f), 9_000L)) // 3 s under: still within the grace period
+        assertTrue(confirmer.add(mph(30f), 10_000L))
+    }
+
+    @Test
+    fun speed_dipLongerThan3Seconds_startsOver() {
+        val confirmer = SpeedConfirmer()
+        confirmer.add(mph(30f), 0L)
+        confirmer.add(mph(30f), 5_000L)
+        for (t in 6_000L..10_000L step 1_000L) assertFalse(confirmer.add(mph(10f), t)) // stopped at a junction
+        assertFalse(confirmer.add(mph(30f), 11_000L))
+        assertFalse(confirmer.add(mph(30f), 20_000L))
+        assertTrue(confirmer.add(mph(30f), 21_000L))
+    }
+
+    @Test
+    fun speed_dips_areLogged() {
+        val lines = mutableListOf<String>()
+        val confirmer = SpeedConfirmer(log = { lines += it })
+        confirmer.add(mph(30f), 0L)
+        confirmer.add(mph(10f), 1_000L)
+        confirmer.add(mph(30f), 2_000L)
+        assertEquals(2, lines.size)
+        assertTrue(lines[1].startsWith("Dip tolerated"))
     }
 
     @Test
