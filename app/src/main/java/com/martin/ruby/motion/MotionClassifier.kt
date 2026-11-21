@@ -28,6 +28,11 @@ data class MotionReading(
     val rhythm: Rhythm = Rhythm(0f, null),
     /** True while sensors are off, waiting for the phone to start moving again. */
     val paused: Boolean = false,
+    /**
+     * This window's result before smoothing. [motion] waits 15 s before saying
+     * "Possibly in a vehicle"; GPS uses this instead, so it can start straight away.
+     */
+    val raw: Motion = motion,
 )
 
 /**

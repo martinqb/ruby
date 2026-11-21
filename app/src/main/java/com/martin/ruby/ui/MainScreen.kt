@@ -12,39 +12,65 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.martin.ruby.data.Car
+import com.martin.ruby.location.LocationReading
+import com.martin.ruby.log.LogEntry
 import com.martin.ruby.motion.Motion
 import com.martin.ruby.motion.MotionReading
 import com.martin.ruby.motion.Rhythm
 import com.martin.ruby.ui.theme.RubyTheme
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-/** The home screen: shows Driving or Not driving, plus buttons to set things up. */
+/** Everything the main screen shows. */
+data class MainUiState(
+    val car: Car? = null,
+    val driving: Boolean = false,
+    val motion: MotionReading? = null,
+    val location: LocationReading = LocationReading(),
+    val savedPlaceCount: Int = 0,
+    val hasBluetoothPermission: Boolean = false,
+    val hasActivityPermission: Boolean = false,
+    val hasLocationPermission: Boolean = false,
+    val hasBackgroundLocation: Boolean = false,
+    val gpsEnabled: Boolean = true,
+    val backgroundSensing: Boolean = true,
+    val batteryOptimized: Boolean = false,
+    val log: List<LogEntry> = emptyList(),
+)
+
+/** Everything the user can do from the main screen. */
+data class MainActions(
+    val onRequestPermissions: () -> Unit = {},
+    val onChooseCar: () -> Unit = {},
+    val onBackgroundSensingChange: (Boolean) -> Unit = {},
+    val onAllowBackground: () -> Unit = {},
+    val onAllowLocation: () -> Unit = {},
+    val onAllowLocationAllTheTime: () -> Unit = {},
+    val onOpenPlaces: () -> Unit = {},
+    val onTestGps: () -> Unit = {},
+    val onClearLog: () -> Unit = {},
+)
+
+/** The home screen: what Ruby senses at the top, setup below. */
 @Composable
-fun MainScreen(
-    car: Car?,
-    driving: Boolean,
-    hasBluetoothPermission: Boolean,
-    onRequestPermission: () -> Unit,
-    onChooseCar: () -> Unit,
-    backgroundSensing: Boolean,
-    onBackgroundSensingChange: (Boolean) -> Unit,
-    batteryOptimized: Boolean,
-    onAllowBackground: () -> Unit,
-    motion: MotionReading?,
-    hasActivityPermission: Boolean,
-    modifier: Modifier = Modifier,
-) {
+fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -54,74 +80,150 @@ fun MainScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = if (driving) "Driving" else "Not driving",
+            text = if (state.driving) "Driving" else "Not driving",
             style = MaterialTheme.typography.displayMedium,
             fontWeight = FontWeight.Bold,
-            color = if (driving) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            color = if (state.driving) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = if (car == null) "No car chosen yet" else "Car: ${car.name}",
+            text = if (state.car == null) "No car chosen yet" else "Car: ${state.car.name}",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(24.dp))
-        MotionInfo(motion)
+        MotionInfo(state.motion)
+        if (state.hasLocationPermission) {
+            Spacer(Modifier.height(16.dp))
+            LocationInfo(state)
+        }
         Spacer(Modifier.height(32.dp))
 
-        if (!hasBluetoothPermission) {
-            Text(
-                text = "Ruby needs Bluetooth access to notice when your phone connects to your car.",
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
+        if (!state.hasBluetoothPermission) {
+            Explained(
+                "Ruby needs Bluetooth access to notice when your phone connects to your car.",
+                "Allow Bluetooth access",
+                actions.onRequestPermissions,
             )
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = onRequestPermission) { Text("Allow Bluetooth access") }
-        } else {
-            OutlinedButton(onClick = onChooseCar) {
-                Text(if (car == null) "Choose your car" else "Change car")
-            }
-            Spacer(Modifier.height(32.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Sense in the background", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "Keeps working when Ruby is closed or the phone restarts.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Spacer(Modifier.width(16.dp))
-                Switch(checked = backgroundSensing, onCheckedChange = onBackgroundSensingChange)
-            }
+            return@Column
+        }
 
-            if (backgroundSensing && !hasActivityPermission) {
-                Spacer(Modifier.height(24.dp))
-                Text(
-                    "Allow Physical activity so Ruby can count steps and tell when you're " +
-                        "walking. It stays on your phone.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = onRequestPermission) { Text("Allow Physical activity") }
-            }
-
-            if (backgroundSensing && batteryOptimized) {
-                Spacer(Modifier.height(24.dp))
-                Text(
-                    "Android may stop Ruby to save battery. Let Ruby run in the background " +
-                        "so it doesn't miss the car connecting.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(12.dp))
-                Button(onClick = onAllowBackground) { Text("Allow background use") }
+        OutlinedButton(onClick = actions.onChooseCar) {
+            Text(if (state.car == null) "Choose your car" else "Change car")
+        }
+        if (state.hasLocationPermission) {
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(onClick = actions.onOpenPlaces) {
+                Text(if (state.savedPlaceCount == 0) "Save places (home, work...)" else "Saved places (${state.savedPlaceCount})")
             }
         }
+
+        Spacer(Modifier.height(24.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Sense in the background", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Keeps working when Ruby is closed or the phone restarts.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.width(16.dp))
+            Switch(checked = state.backgroundSensing, onCheckedChange = actions.onBackgroundSensingChange)
+        }
+
+        if (!state.backgroundSensing) return@Column
+
+        if (!state.hasActivityPermission) {
+            Explained(
+                "Allow Physical activity so Ruby can count steps and tell when you're " +
+                    "walking. It stays on your phone.",
+                "Allow Physical activity",
+                actions.onRequestPermissions,
+            )
+        }
+        when {
+            !state.hasLocationPermission -> Explained(
+                "Allow location so GPS can confirm you're in a vehicle and recognize places " +
+                    "you save. GPS only turns on briefly, and your location stays on your phone.",
+                "Allow location",
+                actions.onAllowLocation,
+            )
+            !state.gpsEnabled -> Explained(
+                "Location is turned off in Android's settings, so GPS can't be used.",
+                null,
+                {},
+            )
+            !state.hasBackgroundLocation -> Explained(
+                "Optional: choose \"Allow all the time\" so GPS also works after the phone " +
+                    "restarts, before you've opened Ruby.",
+                "Allow all the time",
+                actions.onAllowLocationAllTheTime,
+            )
+        }
+        if (state.batteryOptimized) {
+            Explained(
+                "Android may stop Ruby to save battery. Let Ruby run in the background " +
+                    "so it doesn't miss the car connecting.",
+                "Allow background use",
+                actions.onAllowBackground,
+            )
+        }
+
+        Spacer(Modifier.height(24.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+        SensingLogSection(state, actions)
+    }
+}
+
+/** The on-screen log: what sensing and GPS have been doing, newest first. */
+@Composable
+private fun SensingLogSection(state: MainUiState, actions: MainActions) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Log", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        if (state.hasLocationPermission) {
+            TextButton(onClick = actions.onTestGps) { Text("Test GPS now") }
+        }
+        TextButton(onClick = actions.onClearLog, enabled = state.log.isNotEmpty()) { Text("Clear") }
+    }
+    if (state.log.isEmpty()) {
+        Details("Nothing yet. GPS checks, speeds and errors will show up here.")
+        return
+    }
+    val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.getDefault()) }
+    Column(Modifier.fillMaxWidth()) {
+        state.log.forEach { entry ->
+            Row(Modifier.padding(vertical = 2.dp)) {
+                Text(
+                    text = timeFormat.format(Date(entry.timeMillis)),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(entry.message, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+/** A short explanation with an optional button underneath. */
+@Composable
+private fun Explained(text: String, buttonLabel: String?, onClick: () -> Unit) {
+    Spacer(Modifier.height(24.dp))
+    Text(text, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+    if (buttonLabel != null) {
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = onClick) { Text(buttonLabel) }
     }
 }
 
@@ -143,35 +245,80 @@ private fun MotionInfo(reading: MotionReading?) {
             reading.rhythm.perSecond?.let { append(" at %.1f beats/s".format(it)) }
         }
     }
+    Details(details)
+}
+
+/** What GPS has found: vehicle speed and saved place. */
+@Composable
+private fun LocationInfo(state: MainUiState) {
+    val location = state.location
+    val speed = location.speedMph?.let { "%.0f mph".format(it) }
     Text(
-        text = details,
+        text = when {
+            location.inVehicle && location.gpsOn -> "GPS: In a vehicle" + (speed?.let { ", $it" } ?: "")
+            location.inVehicle -> "GPS: In a vehicle"
+            location.gpsOn -> "GPS: on" + (speed?.let { ", $it" } ?: ", finding satellites…")
+            else -> "GPS: off"
+        },
+        style = MaterialTheme.typography.titleMedium,
+    )
+    Details(
+        when {
+            location.inVehicle || location.gpsOn ->
+                "Over 15 mph for 10 seconds confirms a vehicle. Off after 2 minutes without movement."
+            else -> "Turns on when motion looks like a vehicle or the car's Bluetooth connects."
+        }
+    )
+    Spacer(Modifier.height(16.dp))
+    Text(
+        text = "Place: ${location.place ?: "none"}",
+        style = MaterialTheme.typography.titleMedium,
+    )
+    Details(
+        if (state.savedPlaceCount == 0) "Save places to have them recognized."
+        else "Within 100 m of a saved place. Checked when you stop moving."
+    )
+}
+
+@Composable
+private fun Details(text: String) {
+    Text(
+        text = text,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
     )
 }
 
-@Preview(showBackground = true)
+@Preview(showBackground = true, heightDp = 1000)
 @Composable
 private fun MainScreenPreview() {
     RubyTheme {
         MainScreen(
-            car = Car("00:11:22:33:44:55", "Corolla"),
-            driving = true,
-            hasBluetoothPermission = true,
-            onRequestPermission = {},
-            onChooseCar = {},
-            backgroundSensing = true,
-            onBackgroundSensingChange = {},
-            batteryOptimized = true,
-            onAllowBackground = {},
-            motion = MotionReading(
-                Motion.WALKING,
-                variation = 0.74f,
-                stepsPerSecond = 0.4f,
-                rhythm = Rhythm(strength = 0.68f, perSecond = 1.4f),
+            state = MainUiState(
+                car = Car("00:11:22:33:44:55", "Corolla"),
+                driving = true,
+                motion = MotionReading(
+                    Motion.IN_VEHICLE,
+                    variation = 0.42f,
+                    stepsPerSecond = 0f,
+                    rhythm = Rhythm(strength = 0.08f, perSecond = null),
+                ),
+                location = LocationReading(gpsOn = false, speedMph = 34f, inVehicle = true),
+                savedPlaceCount = 2,
+                hasBluetoothPermission = true,
+                hasActivityPermission = true,
+                hasLocationPermission = true,
+                hasBackgroundLocation = false,
+                batteryOptimized = true,
+                log = listOf(
+                    LogEntry(1_700_000_030_000, "Over 15 mph for 15 s: in a vehicle. GPS off."),
+                    LogEntry(1_700_000_020_000, "Speed 31 mph ±5 m."),
+                    LogEntry(1_700_000_010_000, "First GPS fix."),
+                    LogEntry(1_700_000_000_000, "GPS on (motion suggests a vehicle). Checking speed."),
+                ),
             ),
-            hasActivityPermission = true,
+            actions = MainActions(),
         )
     }
 }

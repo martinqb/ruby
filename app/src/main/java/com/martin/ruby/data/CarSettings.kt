@@ -4,15 +4,11 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 /** A Bluetooth device the user picked as their car. */
 data class Car(val address: String, val name: String)
-
-// One DataStore file for the whole app. It must be declared once, at the top level.
-private val Context.dataStore by preferencesDataStore(name = "settings")
 
 /**
  * Saves which device is the car, and whether it's connected right now.

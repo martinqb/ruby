@@ -132,7 +132,7 @@ class MotionSensor(private val context: Context) : SensorEventListener {
 
         val raw = MotionClassifier.classify(variation, stepsPerSecond, rhythm)
         val motion = smoother.smooth(raw)
-        MotionStatus.update(MotionReading(motion, variation, stepsPerSecond, rhythm))
+        MotionStatus.update(MotionReading(motion, variation, stepsPerSecond, rhythm, raw = raw))
         resetWindow()
 
         if (raw == Motion.WALKING || raw == Motion.IN_VEHICLE) {
