@@ -22,6 +22,17 @@ Add as Phase 6 step three, after the Google Drive backup.
 - Connects automatically when Phase 1 detects the car.
 - Read and explain only. No engine tuning.
 
+## Future: place-type detection
+
+- With Martin's permission (off until he turns it on), Ruby checks a GPS position against the Google Places API to learn what kind of place it is: a store, a drive-through, a bank, and so on.
+- Each lookup costs money, so she only checks when it matters:
+  - he has stopped somewhere new for a few minutes,
+  - he asks where he is,
+  - a reminder depends on the type of place ("next time I'm at a pharmacy").
+- She caches places she has already identified, on the phone, so repeat visits cost nothing.
+- Saved places from Phase 4 (home, work, gym) never need a lookup.
+- Only the coordinates go to Google, and only at those moments.
+
 ## Future: services plug-in layer
 
 - Ruby uses outside service APIs (AI video, image, music, search) by voice command.
