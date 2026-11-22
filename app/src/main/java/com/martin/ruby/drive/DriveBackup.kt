@@ -2,6 +2,7 @@ package com.martin.ruby.drive
 
 import android.content.Context
 import com.martin.ruby.backup.BackupManager
+import com.martin.ruby.backup.BackupStatusStore
 import com.martin.ruby.backup.backupFileName
 import com.martin.ruby.log.SensingLog
 
@@ -18,21 +19,27 @@ class DriveBackup(context: Context, private val manager: BackupManager) {
 
     class Uploaded(val file: DriveFile, val messageCount: Int, val deleted: Int)
 
-    /** Makes a backup, uploads it, then deletes all but the newest [DriveRetention.KEEP]. */
+    /**
+     * Makes a backup, uploads it, then deletes all but the newest [DriveRetention.KEEP],
+     * and records the success for the Backup screen. Upload and clean-up are retried
+     * separately, so a token refresh after the upload can't upload it twice.
+     */
     suspend fun backUp(token: String): Uploaded {
         val backup = manager.makeBackup()
         val name = backupFileName()
-        return withDrive(token) { drive ->
-            val file = drive.upload(name, backup.bytes)
-            // Only after the new one is safely up. A failed delete isn't worth failing over.
-            val old = runCatching { DriveRetention.toDelete(drive.list()) }.getOrDefault(emptyList())
-            val deleted = old.count { runCatching { drive.delete(it.id) }.isSuccess }
-            SensingLog.add(
-                "Backed up to Google Drive: ${backup.messageCount} messages, ${backup.bytes.size / 1024} KB" +
-                    (if (deleted > 0) ", removed $deleted older." else ".")
-            )
-            Uploaded(file, backup.messageCount, deleted)
-        }
+        val file = withDrive(token) { drive -> drive.upload(name, backup.bytes) }
+        // Only after the new one is safely up. A failed delete isn't worth failing over.
+        val deleted = runCatching {
+            withDrive(token) { drive ->
+                DriveRetention.toDelete(drive.list()).count { runCatching { drive.delete(it.id) }.isSuccess }
+            }
+        }.getOrDefault(0)
+        BackupStatusStore(appContext).recordSuccess(backup.messageCount, file.sizeBytes)
+        SensingLog.add(
+            "Backed up to Google Drive: ${backup.messageCount} messages, ${backup.bytes.size / 1024} KB" +
+                (if (deleted > 0) ", removed $deleted older." else ".")
+        )
+        return Uploaded(file, backup.messageCount, deleted)
     }
 
     /** The backups in Drive, newest first. */

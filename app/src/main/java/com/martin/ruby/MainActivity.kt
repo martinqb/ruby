@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.martin.ruby.backup.BackupManager
+import com.martin.ruby.backup.BackupStatusStore
+import com.martin.ruby.backup.NightlyBackup
 import com.martin.ruby.bluetooth.CarBluetooth
 import com.martin.ruby.data.CarSettings
 import com.martin.ruby.data.Place
@@ -68,6 +70,9 @@ class MainActivity : ComponentActivity() {
     private var savingPlace by mutableStateOf(false)
     private var placeMessage by mutableStateOf<String?>(null)
 
+    /** Set when a notification (e.g. "approve Drive access again") asks for the Backup screen. */
+    private var openBackupRequested by mutableStateOf(false)
+
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             onPermissionsChanged()
@@ -79,7 +84,16 @@ class MainActivity : ComponentActivity() {
         placeStore = PlaceStore(applicationContext)
         memoryStore = MemoryStore(applicationContext)
         backupManager = BackupManager(applicationContext)
+        openBackupRequested = intent?.getBooleanExtra(EXTRA_OPEN_BACKUP, false) == true
         checkPermissions()
+
+        // Android's own backup can bring "nightly is on" to a new phone without the
+        // scheduled job, so make sure it's scheduled. Scheduling again changes nothing.
+        lifecycleScope.launch {
+            if (BackupStatusStore(applicationContext).current().nightlyOn && backupManager.isSetUp()) {
+                NightlyBackup.schedule(applicationContext)
+            }
+        }
 
         // Ask the first time the app opens (or the first time after an update adds a permission).
         // Location is asked for separately, when the user taps "Allow location".
@@ -99,6 +113,10 @@ class MainActivity : ComponentActivity() {
                 val places by placeStore.places.collectAsState(initial = emptyList())
                 val log by SensingLog.entries.collectAsState()
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
+                if (openBackupRequested) {
+                    openBackupRequested = false
+                    screen = Screen.BACKUP
+                }
 
                 if (screen != Screen.MAIN) BackHandler {
                     screen = if (screen == Screen.BACKUP) Screen.MEMORY else Screen.MAIN
@@ -186,6 +204,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_BACKUP, false)) openBackupRequested = true
     }
 
     override fun onResume() {
@@ -300,5 +323,10 @@ class MainActivity : ComponentActivity() {
             // Some phones don't have the dialog; open the battery settings list instead.
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         }
+    }
+
+    companion object {
+        /** Intent extra: open straight to the Backup screen. */
+        const val EXTRA_OPEN_BACKUP = "com.martin.ruby.OPEN_BACKUP"
     }
 }

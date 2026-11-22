@@ -38,7 +38,14 @@ object DriveAuth {
     }
 
     /** Thrown with a plain-English reason when Google won't authorize Ruby. */
-    class Failed(message: String, cause: Throwable? = null) : Exception(message, cause)
+    open class Failed(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+    /**
+     * Google wants the user to approve access again, so nothing can happen in the
+     * background until they do (access was removed, or, while the Google project is in
+     * testing mode, about a week has passed).
+     */
+    class NeedsApproval : Failed("Google Drive access needs approving again.")
 
     private fun request() = AuthorizationRequest.builder()
         .setRequestedScopes(listOf(Scope(SCOPE)))
@@ -65,17 +72,19 @@ object DriveAuth {
         throw explain(e)
     }
 
+    /** A token without asking the user; throws [NeedsApproval] if they have to agree again. */
+    suspend fun silentToken(context: Context): String = when (val result = authorize(context)) {
+        is Result.Token -> result.accessToken
+        is Result.NeedsConsent -> throw NeedsApproval()
+    }
+
     /**
      * After Drive says a token is no longer valid: forgets it and asks for a new one,
-     * silently. Throws [Failed] if the user has to agree again (e.g. access was removed,
-     * or, while the Google project is in testing mode, about a week has passed).
+     * silently. Throws [NeedsApproval] if the user has to agree again.
      */
     suspend fun refresh(context: Context, oldToken: String): String {
         withContext(Dispatchers.IO) { runCatching { GoogleAuthUtil.clearToken(context, oldToken) } }
-        return when (val result = authorize(context)) {
-            is Result.Token -> result.accessToken
-            is Result.NeedsConsent -> throw Failed("Google Drive access needs approving again. Open Backup and tap a Drive button.")
-        }
+        return silentToken(context)
     }
 
     private fun explain(e: ApiException): Failed = Failed(

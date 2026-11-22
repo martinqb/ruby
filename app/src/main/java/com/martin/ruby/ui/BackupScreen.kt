@@ -32,10 +32,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +56,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.martin.ruby.backup.BackupCrypto
 import com.martin.ruby.backup.BackupManager
+import com.martin.ruby.backup.BackupStatus
+import com.martin.ruby.backup.BackupStatusStore
+import com.martin.ruby.backup.NightlyBackup
 import com.martin.ruby.backup.backupFileName
 import com.martin.ruby.drive.DriveAuth
 import com.martin.ruby.drive.DriveBackup
@@ -79,6 +84,8 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val drive = remember(manager) { DriveBackup(context, manager) }
+    val statusStore = remember { BackupStatusStore(context) }
+    val status by statusStore.status.collectAsState(initial = BackupStatus())
     /** The backups in Drive, once listed. */
     var driveFiles by remember { mutableStateOf<List<DriveFile>?>(null) }
 
@@ -206,6 +213,44 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
                 onCancel = { changing = false },
             )
             else -> {
+                if (status.needsApproval) {
+                    ApprovalBanner(
+                        busy = busy != null,
+                        onApprove = {
+                            withDrive("Approving and backing up…") { token ->
+                                val uploaded = drive.backUp(token)
+                                NightlyBackup.clearApprovalNotice(context)
+                                message = "Approved. Backed up ${uploaded.messageCount} messages; nightly backups will carry on."
+                            }
+                        },
+                    )
+                    Spacer(Modifier.height(16.dp))
+                }
+                NightlySection(
+                    status = status,
+                    busy = busy != null,
+                    onNightlyChange = { on ->
+                        if (on) {
+                            // Asks for Drive access now, while the user is here, not at 2 AM.
+                            withDrive("Checking Google Drive access…") {
+                                statusStore.setNightlyOn(true)
+                                NightlyBackup.schedule(context)
+                                message = "Nightly backups are on. They run while the phone charges on Wi-Fi."
+                            }
+                        } else {
+                            scope.launch {
+                                statusStore.setNightlyOn(false)
+                                NightlyBackup.cancel(context)
+                            }
+                            message = "Nightly backups are off."
+                        }
+                    },
+                    onTestNow = {
+                        NightlyBackup.runTestNow(context)
+                        message = "Nightly backup started in the background. The status above updates when it finishes."
+                    },
+                )
+                Spacer(Modifier.height(24.dp))
                 Text("Back up now", style = MaterialTheme.typography.titleMedium)
                 Text(
                     "Google Drive: goes to a private folder in your Drive that only Ruby can see. " +
@@ -347,6 +392,74 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
             Spacer(Modifier.height(16.dp))
             Text(it, style = MaterialTheme.typography.bodyMedium)
         }
+    }
+}
+
+/** "Google needs you to approve again": why backups stopped, and the button that fixes it. */
+@Composable
+private fun ApprovalBanner(busy: Boolean, onApprove: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                "Backups are paused",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Google needs you to approve Ruby's access to your Google Drive again. Until then, " +
+                    "nightly backups can't run. Your memory on this phone is fine.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = onApprove, enabled = !busy) { Text("Approve") }
+        }
+    }
+}
+
+/** The nightly backup switch, how the last backup went, and a button to test it now. */
+@Composable
+private fun NightlySection(
+    status: BackupStatus,
+    busy: Boolean,
+    onNightlyChange: (Boolean) -> Unit,
+    onTestNow: () -> Unit,
+) {
+    val dateTime = remember { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Nightly backup to Google Drive", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Once a night while the phone is charging on Wi-Fi.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = status.nightlyOn, onCheckedChange = onNightlyChange, enabled = !busy)
+    }
+    Spacer(Modifier.height(8.dp))
+    Text(
+        status.lastSuccessMillis?.let {
+            "Last backup: ${dateTime.format(Date(it))} · ${status.lastMessageCount} messages · " +
+                sizeLabel(status.lastSizeBytes.toInt())
+        } ?: "No backup to Google Drive yet.",
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    val failedAt = status.lastFailureMillis
+    if (failedAt != null && failedAt > (status.lastSuccessMillis ?: 0L) && !status.needsApproval) {
+        Text(
+            "Last try failed (${dateTime.format(Date(failedAt))}): ${status.lastError}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+    if (status.nightlyOn) {
+        TextButton(onClick = onTestNow, enabled = !busy) { Text("Test the nightly backup now") }
     }
 }
 
