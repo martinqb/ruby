@@ -11,11 +11,15 @@ import androidx.room.Query
 import androidx.room.RawQuery
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.withTransaction
 import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteQuery
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withContext
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
+import java.io.File
 
 /** One message in Ruby's memory. */
 @Entity(tableName = "messages", indices = [Index("timeMillis")])
@@ -47,6 +51,9 @@ interface MemoryDao {
 
     @Query("SELECT COUNT(*) FROM messages")
     fun count(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM messages")
+    suspend fun countNow(): Int
 
     @Query("DELETE FROM messages WHERE id = :id")
     suspend fun delete(id: Long)
@@ -88,6 +95,67 @@ abstract class MemoryDatabase : RoomDatabase() {
             instance?.close()
             instance = null
         }
+
+        /** A consistent copy of the database files, for a backup. */
+        class Snapshot(val database: ByteArray, val wal: ByteArray, val messageCount: Int)
+
+        /**
+         * Copies the database files while holding the write lock, so nothing can change them
+         * halfway through the copy. The files stay encrypted with the database key.
+         */
+        suspend fun snapshot(context: Context): Snapshot = withContext(Dispatchers.IO) {
+            val db = get(context)
+            // Move recent changes into the main file first, so the log is small.
+            runCatching {
+                db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+            }
+            db.withTransaction {
+                val file = context.getDatabasePath(FILE_NAME)
+                Snapshot(
+                    database = file.readBytes(),
+                    wal = File(file.path + "-wal").takeIf { it.exists() }?.readBytes() ?: ByteArray(0),
+                    messageCount = db.dao().countNow(),
+                )
+            }
+        }
+
+        /**
+         * Replaces memory with restored files and their key. The current files and key are
+         * kept aside until the restored database has opened and been read; if anything
+         * fails, they're put back and the error is passed on. Returns the message count.
+         */
+        suspend fun replace(context: Context, database: ByteArray, wal: ByteArray, key: ByteArray): Int =
+            withContext(Dispatchers.IO) {
+                synchronized(this@Companion) {
+                    close()
+                    val main = context.getDatabasePath(FILE_NAME)
+                    main.parentFile?.mkdirs()
+                    val parts = listOf("", "-wal", "-shm", "-journal").map { File(main.path + it) }
+                    val asides = parts.map { File(it.path + ".before-restore") }
+                    val oldKey = runCatching { MemoryKey.get(context) }.getOrNull()
+
+                    asides.forEach { it.delete() }
+                    parts.zip(asides).forEach { (part, aside) -> if (part.exists()) part.renameTo(aside) }
+                    try {
+                        main.writeBytes(database)
+                        if (wal.isNotEmpty()) File(main.path + "-wal").writeBytes(wal)
+                        MemoryKey.save(context, key)
+                        val restored = open(context)
+                        val count = restored.openHelper.writableDatabase
+                            .query("SELECT COUNT(*) FROM messages")
+                            .use { it.moveToFirst(); it.getInt(0) }
+                        instance = restored
+                        asides.forEach { it.delete() }
+                        count
+                    } catch (e: Exception) {
+                        close()
+                        parts.forEach { it.delete() }
+                        parts.zip(asides).forEach { (part, aside) -> if (aside.exists()) aside.renameTo(part) }
+                        oldKey?.let { MemoryKey.save(context, it) }
+                        throw e
+                    }
+                }
+            }
 
         private fun open(context: Context): MemoryDatabase = open(context, FILE_NAME)
 

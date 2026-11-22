@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
+import com.martin.ruby.backup.BackupManager
 import com.martin.ruby.bluetooth.CarBluetooth
 import com.martin.ruby.data.CarSettings
 import com.martin.ruby.data.Place
@@ -36,6 +37,7 @@ import com.martin.ruby.memory.MemoryStore
 import com.martin.ruby.motion.MotionSensor
 import com.martin.ruby.motion.MotionStatus
 import com.martin.ruby.sensing.BackgroundSensing
+import com.martin.ruby.ui.BackupScreen
 import com.martin.ruby.ui.CarPickerScreen
 import com.martin.ruby.ui.MainActions
 import com.martin.ruby.ui.MainScreen
@@ -47,13 +49,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Which screen is showing. */
-private enum class Screen { MAIN, CAR_PICKER, PLACES, MEMORY }
+private enum class Screen { MAIN, CAR_PICKER, PLACES, MEMORY, BACKUP }
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var settings: CarSettings
     private lateinit var placeStore: PlaceStore
     private lateinit var memoryStore: MemoryStore
+    private lateinit var backupManager: BackupManager
 
     // Compose redraws the screen whenever these change.
     private var hasBluetoothPermission by mutableStateOf(false)
@@ -75,6 +78,7 @@ class MainActivity : ComponentActivity() {
         settings = CarSettings(applicationContext)
         placeStore = PlaceStore(applicationContext)
         memoryStore = MemoryStore(applicationContext)
+        backupManager = BackupManager(applicationContext)
         checkPermissions()
 
         // Ask the first time the app opens (or the first time after an update adds a permission).
@@ -96,7 +100,9 @@ class MainActivity : ComponentActivity() {
                 val log by SensingLog.entries.collectAsState()
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
 
-                if (screen != Screen.MAIN) BackHandler { screen = Screen.MAIN }
+                if (screen != Screen.MAIN) BackHandler {
+                    screen = if (screen == Screen.BACKUP) Screen.MEMORY else Screen.MAIN
+                }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     val modifier = Modifier.padding(innerPadding)
@@ -120,7 +126,14 @@ class MainActivity : ComponentActivity() {
 
                         Screen.MEMORY -> MemoryScreen(
                             store = memoryStore,
+                            onOpenBackup = { screen = Screen.BACKUP },
                             onBack = { screen = Screen.MAIN },
+                            modifier = modifier,
+                        )
+
+                        Screen.BACKUP -> BackupScreen(
+                            manager = backupManager,
+                            onBack = { screen = Screen.MEMORY },
                             modifier = modifier,
                         )
 

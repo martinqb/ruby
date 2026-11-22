@@ -45,7 +45,12 @@ import java.util.Date
  * chat messages will be, so saving, search and (soon) backup can be tested.
  */
 @Composable
-fun MemoryScreen(store: MemoryStore, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun MemoryScreen(
+    store: MemoryStore,
+    onOpenBackup: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val scope = rememberCoroutineScope()
     var query by rememberSaveable { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -66,6 +71,7 @@ fun MemoryScreen(store: MemoryStore, onBack: () -> Unit, modifier: Modifier = Mo
         onAdd = { text -> scope.launch { store.add(MemoryMessage.ROLE_USER, text) } },
         onDelete = { message -> scope.launch { store.delete(message) } },
         onDeleteAll = { scope.launch { store.deleteAll() } },
+        onOpenBackup = onOpenBackup,
         onBack = onBack,
         modifier = modifier,
     )
@@ -81,6 +87,7 @@ private fun MemoryContent(
     onAdd: (String) -> Unit,
     onDelete: (MemoryMessage) -> Unit,
     onDeleteAll: () -> Unit,
+    onOpenBackup: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -88,10 +95,14 @@ private fun MemoryContent(
     var confirmDeleteAll by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
-        TextButton(onClick = onBack) { Text("Back") }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = onBack) { Text("Back") }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onOpenBackup) { Text("Backup and restore") }
+        }
         Text("Memory", style = MaterialTheme.typography.headlineSmall)
         Text(
-            "Saved on this phone only, encrypted. " +
+            "Saved on this phone, encrypted. " +
                 if (count == 1) "1 message." else "$count messages.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -197,6 +208,7 @@ private fun MemoryScreenPreview() {
             onAdd = {},
             onDelete = {},
             onDeleteAll = {},
+            onOpenBackup = {},
             onBack = {},
         )
     }
