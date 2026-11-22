@@ -69,6 +69,94 @@ class SpeedConfirmer(
     }
 }
 
+/**
+ * Decides when GPS shows you've stopped for good: readings under [stopMph] for [holdMillis]
+ * (the "off-timer"). Used to end "In a vehicle" after you park.
+ *
+ * Parked indoors, GPS drifts: the position wanders and short, made-up speeds appear. So
+ * a faster reading only resets the off-timer when it's believable:
+ *  - it's accurate to within [maxAccuracyMeters] (drift usually comes with poor accuracy), and
+ *  - it lasts at least [driftMillis] in a row.
+ * Anything else is ignored as drift, and the timer keeps running.
+ *
+ * [log] is told when the timer starts, resets, or ignores drift.
+ */
+class StopDetector(
+    private val stopMph: Float = STOP_MPH,
+    private val holdMillis: Long = HOLD_MILLIS,
+    private val driftMillis: Long = DRIFT_MILLIS,
+    private val maxAccuracyMeters: Float = MAX_ACCURACY_METERS,
+    private val log: (String) -> Unit = {},
+) {
+    private var slowSinceMillis: Long? = null
+    private var fastSinceMillis: Long? = null
+    private var fastestInBurst = 0f
+    private var inaccurateLogged = false
+
+    /**
+     * Adds one GPS fix: [mph] is null if it had no speed, [accuracyMeters] null if unknown.
+     * Returns true once the speed has stayed under [stopMph] for [holdMillis].
+     */
+    fun add(mph: Float?, accuracyMeters: Float?, timeMillis: Long): Boolean {
+        val inaccurate = accuracyMeters != null && accuracyMeters > maxAccuracyMeters
+        val movingMph = mph?.takeIf { it >= stopMph && !inaccurate }
+
+        if (movingMph == null) {
+            val slowSince = slowSinceMillis
+            if (slowSince == null) {
+                slowSinceMillis = timeMillis
+                inaccurateLogged = false
+                log(
+                    "Under %.0f mph: off-timer started; leaving the vehicle in %d min unless moving again."
+                        .format(stopMph, holdMillis / 60_000)
+                )
+            }
+            fastSinceMillis?.let { fastSince ->
+                log(
+                    "Ignored %d s at up to %.0f mph (GPS drift); off-timer still running."
+                        .format((timeMillis - fastSince) / 1000, fastestInBurst)
+                )
+                fastSinceMillis = null
+            }
+            if (inaccurate && mph != null && mph >= stopMph && !inaccurateLogged) {
+                inaccurateLogged = true
+                log("Ignoring %.0f mph at ±%.0f m (too inaccurate, probably drift).".format(mph, accuracyMeters))
+            }
+            return timeMillis - (slowSince ?: timeMillis) >= holdMillis
+        }
+
+        val slowSince = slowSinceMillis ?: return false // moving, and no timer to reset
+        val fastSince = fastSinceMillis ?: timeMillis.also {
+            fastSinceMillis = it
+            fastestInBurst = 0f
+        }
+        fastestInBurst = maxOf(fastestInBurst, movingMph)
+        if (timeMillis - fastSince >= driftMillis) {
+            log(
+                "Moving again (%.0f mph for %d s): off-timer reset after %d s."
+                    .format(movingMph, (timeMillis - fastSince) / 1000, (timeMillis - slowSince) / 1000)
+            )
+            reset()
+        }
+        return false
+    }
+
+    fun reset() {
+        slowSinceMillis = null
+        fastSinceMillis = null
+    }
+
+    companion object {
+        /** Under this counts as stopped. Parked GPS drift is mostly below it. */
+        const val STOP_MPH = 3f
+        const val HOLD_MILLIS = 2 * 60_000L
+        /** Faster readings have to last this long to reset the timer. */
+        const val DRIFT_MILLIS = 5_000L
+        /** Faster readings less accurate than this are ignored as drift. */
+        const val MAX_ACCURACY_METERS = 25f
+    }
+}
+
 /** Finds which saved place you're at. This is simple geofencing, done on the phone. */
 object PlaceMatcher {
 

@@ -289,7 +289,8 @@ private fun LocationInfo(state: MainUiState) {
     Details(
         when {
             location.inVehicle || location.gpsOn ->
-                "Over 15 mph for 10 seconds confirms a vehicle. Off after 2 minutes without movement."
+                "Over 15 mph for 10 seconds confirms a vehicle. Ends after 2 minutes under 3 mph or " +
+                    "without a GPS fix, or when the car disconnects and you're still or walking."
             else -> "Turns on when motion looks like a vehicle or the car's Bluetooth connects."
         }
     )
