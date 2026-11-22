@@ -75,14 +75,15 @@ Only change the state after it holds for 30 to 60 seconds, so a stoplight doesn'
 
 ## Phase 6: Memory that lasts forever, owned by the user
 
-**Goal:** every conversation is saved on the phone, searchable, and backed up to drives the user controls. The AI provider never keeps the archive.
+**Goal:** every conversation is saved on the phone, searchable, and backed up to the user's own Google Drive. The AI provider never keeps the archive.
 
 1. **Save chats locally.** Store every message in a Room database (Android's SQLite library) encrypted with SQLCipher. Keep the encryption key in the Android Keystore.
 2. **Add search.** Start with SQLite's built-in full-text search (FTS5). Later, add on-device embeddings so the app can find past chats by meaning, not just keywords.
 3. **Send only what's relevant.** With each new message, the app finds the few most relevant past snippets and sends them along to Claude. This is called RAG (retrieval-augmented generation), and it's how "forever" memory fits in a limited context window.
 4. **Summarize old chats.** Periodically condense older conversations into short summaries, so search stays fast and fewer tokens are sent.
-5. **Encrypted backups.** Export the database, encrypted with a key only the user holds, to their PC, a home drive or NAS (Syncthing works well), or their own cloud storage. Run it automatically with WorkManager, for example nightly while charging on Wi-Fi.
-6. **Restore and control.** Add a restore screen for a new phone, plus view, export and delete buttons so users can see and manage everything stored.
+5. **Encrypted backups to the user's own Google Drive.** Back up to the user's Google Drive, not a server, using the Drive API's private app data folder (`drive.appdata` scope) so only Ruby can see the files. Compress and encrypt the database on the phone before uploading. Derive the backup key from a passphrase the user chooses (or give them a recovery key to save), not only a key locked to this phone, so the backup can be restored on a new phone. Run it automatically with WorkManager, for example nightly while charging on Wi-Fi.
+6. **Storage limit.** Give local memory a storage budget, by default about 5% of the phone's total storage, which the user can change in settings to another percentage or a fixed amount in GB or TB. Ruby never fills the drive and always leaves free space for the phone. She warns at about 80% of her budget. At the limit she never deletes memories: she compresses them or moves the oldest ones to the encrypted Google Drive backup, and pulls them back down when asked.
+7. **Restore and control.** Add a restore screen for a new phone, plus view, export and delete buttons so users can see and manage everything stored.
 
 **Test:** chat for a few days, wipe the app, restore from backup, and ask about something from day one.
 
