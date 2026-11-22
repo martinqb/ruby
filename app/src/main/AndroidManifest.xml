@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Phase 6: backups to the user's own Google Drive. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Phase 1: notice when the phone connects to the car. -->
     <!-- Android 12+ asks the user for this one at runtime. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />

@@ -8,6 +8,9 @@ import com.martin.ruby.security.KeystoreBox
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Sets up backups, makes them, and restores them. Where a backup goes (a file now, the
@@ -101,3 +104,7 @@ class BackupManager(context: Context) {
         const val HEADER_FILE = "backup_header.bin"
     }
 }
+
+/** The name Ruby gives backups, like "ruby-memory-2026-11-22-1432.rubybackup". */
+fun backupFileName(now: Date = Date()): String =
+    "ruby-memory-" + SimpleDateFormat("yyyy-MM-dd-HHmm", Locale.US).format(now) + ".rubybackup"

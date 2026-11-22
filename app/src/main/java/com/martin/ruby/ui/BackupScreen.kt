@@ -1,5 +1,6 @@
 package com.martin.ruby.ui
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -9,6 +10,7 @@ import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -51,6 +54,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.martin.ruby.backup.BackupCrypto
 import com.martin.ruby.backup.BackupManager
+import com.martin.ruby.backup.backupFileName
+import com.martin.ruby.drive.DriveAuth
+import com.martin.ruby.drive.DriveBackup
+import com.martin.ruby.drive.DriveClient
+import com.martin.ruby.drive.DriveFile
+import com.martin.ruby.drive.DriveRetention
 import com.martin.ruby.ui.theme.RubyTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -61,13 +70,17 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Backup and restore. For now a backup is a file the user saves where they like (Google
- * Drive comes next); restoring from a file is how a new phone gets its memory back.
+ * Backup and restore. A backup goes to the user's Google Drive (a private folder only Ruby
+ * can see) or to a file they save; restoring from either is how a new phone gets its
+ * memory back.
  */
 @Composable
 fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val drive = remember(manager) { DriveBackup(context, manager) }
+    /** The backups in Drive, once listed. */
+    var driveFiles by remember { mutableStateOf<List<DriveFile>?>(null) }
 
     var setUp by remember { mutableStateOf<Boolean?>(null) }
     var busy by remember { mutableStateOf<String?>(null) }
@@ -89,6 +102,12 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
                 block()
             } catch (e: BackupCrypto.CantOpen) {
                 message = e.message
+            } catch (e: DriveAuth.Failed) {
+                message = e.message
+            } catch (e: DriveClient.Error) {
+                message = e.message
+            } catch (e: java.io.IOException) {
+                message = "Couldn't reach Google Drive: ${e.message ?: "check the internet connection"}."
             } catch (e: Exception) {
                 message = "Something went wrong: ${e.message ?: e.javaClass.simpleName}"
             } finally {
@@ -106,6 +125,35 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
             writeFile(context, uri, backup.bytes)
             message = "Backup saved: ${backup.messageCount} messages, ${sizeLabel(backup.bytes.size)}, " +
                 "encrypted. Keep a copy off this phone."
+        }
+    }
+
+    // Google Drive: get a token (asking the user the first time), then run the action.
+    var afterConsent by remember { mutableStateOf<(suspend (String) -> Unit)?>(null) }
+    var afterConsentLabel by remember { mutableStateOf("") }
+    val consentLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        val action = afterConsent
+        afterConsent = null
+        if (action == null) return@rememberLauncherForActivityResult
+        if (result.resultCode != Activity.RESULT_OK) {
+            message = "Google Drive access wasn't allowed."
+            return@rememberLauncherForActivityResult
+        }
+        run(afterConsentLabel) { action(DriveAuth.tokenFromIntent(context, result.data)) }
+    }
+
+    fun withDrive(what: String, action: suspend (token: String) -> Unit) {
+        run(what) {
+            when (val auth = DriveAuth.authorize(context)) {
+                is DriveAuth.Result.Token -> action(auth.accessToken)
+                is DriveAuth.Result.NeedsConsent -> {
+                    afterConsent = action
+                    afterConsentLabel = what
+                    consentLauncher.launch(IntentSenderRequest.Builder(auth.pendingIntent).build())
+                }
+            }
         }
     }
 
@@ -160,14 +208,30 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
             else -> {
                 Text("Back up now", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Saves an encrypted backup file. Put it somewhere other than this phone, like " +
-                        "your computer. (Automatic backups to your Google Drive come next.)",
+                    "Google Drive: goes to a private folder in your Drive that only Ruby can see. " +
+                        "Ruby keeps the newest ${DriveRetention.KEEP} there.\n" +
+                        "File: saves a backup file wherever you choose, like your computer.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
-                Button(onClick = { saveLauncher.launch(backupFileName()) }, enabled = busy == null) {
-                    Text("Save a backup file")
+                Row {
+                    Button(
+                        onClick = {
+                            withDrive("Backing up to Google Drive…") { token ->
+                                val uploaded = drive.backUp(token)
+                                if (driveFiles != null) driveFiles = drive.list(token)
+                                message = "Backed up to Google Drive: ${uploaded.messageCount} messages, " +
+                                    sizeLabel(uploaded.file.sizeBytes.toInt()) + "." +
+                                    if (uploaded.deleted > 0) " Removed ${uploaded.deleted} older backups." else ""
+                            }
+                        },
+                        enabled = busy == null,
+                    ) { Text("Google Drive") }
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = { saveLauncher.launch(backupFileName()) }, enabled = busy == null) {
+                        Text("File")
+                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 TextButton(onClick = { changing = true }, enabled = busy == null) {
@@ -187,8 +251,41 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = { openLauncher.launch(arrayOf("*/*")) }, enabled = busy == null) {
-            Text(if (restoreFile == null) "Choose a backup file" else "Choose a different file")
+        Row {
+            OutlinedButton(
+                onClick = { withDrive("Looking in Google Drive…") { token -> driveFiles = drive.list(token) } },
+                enabled = busy == null,
+            ) { Text("From Google Drive") }
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(onClick = { openLauncher.launch(arrayOf("*/*")) }, enabled = busy == null) {
+                Text("From a file")
+            }
+        }
+        driveFiles?.let { files ->
+            Spacer(Modifier.height(8.dp))
+            if (files.isEmpty()) {
+                Text("No backups in your Google Drive yet.", style = MaterialTheme.typography.bodyMedium)
+            }
+            files.forEach { file ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(file.modifiedMillis)) +
+                            " · " + sizeLabel(file.sizeBytes.toInt()),
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(
+                        onClick = {
+                            withDrive("Downloading the backup…") { token ->
+                                restoreFile = ChosenFile(file.name, file.modifiedMillis, drive.download(token, file))
+                                unlocked = null
+                                driveFiles = null
+                            }
+                        },
+                        enabled = busy == null,
+                    ) { Text("Use this") }
+                }
+            }
         }
         restoreFile?.let { file ->
             Spacer(Modifier.height(12.dp))
@@ -373,9 +470,6 @@ private fun RecoveryKeyContent(
 }
 
 // Helpers
-
-private fun backupFileName(): String =
-    "ruby-memory-" + SimpleDateFormat("yyyy-MM-dd-HHmm", Locale.US).format(Date()) + ".rubybackup"
 
 private fun sizeLabel(bytes: Int): String = when {
     bytes < 1024 -> "$bytes bytes"
