@@ -32,6 +32,7 @@ import com.martin.ruby.decision.ContextStatus
 import com.martin.ruby.location.GpsReader
 import com.martin.ruby.location.LocationStatus
 import com.martin.ruby.log.SensingLog
+import com.martin.ruby.memory.MemoryStore
 import com.martin.ruby.motion.MotionSensor
 import com.martin.ruby.motion.MotionStatus
 import com.martin.ruby.sensing.BackgroundSensing
@@ -39,18 +40,20 @@ import com.martin.ruby.ui.CarPickerScreen
 import com.martin.ruby.ui.MainActions
 import com.martin.ruby.ui.MainScreen
 import com.martin.ruby.ui.MainUiState
+import com.martin.ruby.ui.MemoryScreen
 import com.martin.ruby.ui.PlacesScreen
 import com.martin.ruby.ui.theme.RubyTheme
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Which screen is showing. */
-private enum class Screen { MAIN, CAR_PICKER, PLACES }
+private enum class Screen { MAIN, CAR_PICKER, PLACES, MEMORY }
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var settings: CarSettings
     private lateinit var placeStore: PlaceStore
+    private lateinit var memoryStore: MemoryStore
 
     // Compose redraws the screen whenever these change.
     private var hasBluetoothPermission by mutableStateOf(false)
@@ -71,6 +74,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         settings = CarSettings(applicationContext)
         placeStore = PlaceStore(applicationContext)
+        memoryStore = MemoryStore(applicationContext)
         checkPermissions()
 
         // Ask the first time the app opens (or the first time after an update adds a permission).
@@ -114,6 +118,12 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
+                        Screen.MEMORY -> MemoryScreen(
+                            store = memoryStore,
+                            onBack = { screen = Screen.MAIN },
+                            modifier = modifier,
+                        )
+
                         Screen.PLACES -> PlacesScreen(
                             places = places,
                             currentPlace = location.place,
@@ -153,6 +163,7 @@ class MainActivity : ComponentActivity() {
                                 onAllowLocation = ::requestLocation,
                                 onAllowLocationAllTheTime = ::requestBackgroundLocation,
                                 onOpenPlaces = { screen = Screen.PLACES },
+                                onOpenMemory = { screen = Screen.MEMORY },
                                 onTestGps = { BackgroundSensing.testGps(this) },
                                 onClearLog = SensingLog::clear,
                             ),

@@ -24,11 +24,23 @@ object ContextStatus {
     private val _reading = MutableStateFlow<ContextReading?>(null)
     val reading: StateFlow<ContextReading?> = _reading.asStateFlow()
 
+    private val recent = RecentStates()
+
     fun update(reading: ContextReading) {
         _reading.value = reading
     }
 
+    /** Records one decision (before the 30 s hold). Times are SystemClock.elapsedRealtime(). */
+    @Synchronized
+    fun record(state: ContextState, timeMillis: Long) = recent.add(state, timeMillis)
+
+    /** The strongest decision of the last 10 s, or null if the engine isn't running. */
+    @Synchronized
+    fun strongestRecent(timeMillis: Long): ContextState? = recent.strongest(timeMillis)
+
+    @Synchronized
     fun clear() {
         _reading.value = null
+        recent.clear()
     }
 }

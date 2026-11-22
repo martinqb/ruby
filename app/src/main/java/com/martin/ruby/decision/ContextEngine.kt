@@ -70,6 +70,7 @@ class ContextEngine(private val context: Context, private val scope: CoroutineSc
     private fun onInputs(inputs: ContextInputs) {
         val now = SystemClock.elapsedRealtime()
         val decision = ContextRules.decide(inputs)
+        ContextStatus.record(decision.state, now)
         val previous = smoother.current
 
         // Only real changes are logged. A pending state isn't: motion can flicker every

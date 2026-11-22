@@ -68,6 +68,7 @@ data class MainActions(
     val onAllowLocation: () -> Unit = {},
     val onAllowLocationAllTheTime: () -> Unit = {},
     val onOpenPlaces: () -> Unit = {},
+    val onOpenMemory: () -> Unit = {},
     val onTestGps: () -> Unit = {},
     val onClearLog: () -> Unit = {},
 )
@@ -116,6 +117,8 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
                 Text(if (state.savedPlaceCount == 0) "Save places (home, work...)" else "Saved places (${state.savedPlaceCount})")
             }
         }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = actions.onOpenMemory) { Text("Memory") }
 
         Spacer(Modifier.height(24.dp))
         HorizontalDivider()

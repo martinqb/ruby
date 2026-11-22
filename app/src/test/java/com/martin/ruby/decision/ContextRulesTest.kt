@@ -114,6 +114,34 @@ class ContextRulesTest {
         assertEquals(still, smoother.add(still, 40_000L))
     }
 
+    // RecentStates: the strongest state of the last 10 s, for tagging notes
+
+    @Test
+    fun recent_picksTheStrongest() {
+        val recent = RecentStates()
+        recent.add(walking, 0L)
+        recent.add(ContextState(Kind.MOVING), 5_000L) // phone out of the pocket
+        assertEquals(walking, recent.strongest(6_000L))
+    }
+
+    @Test
+    fun recent_forgetsAfter10Seconds() {
+        val recent = RecentStates()
+        recent.add(walking, 0L)
+        recent.add(still, 5_000L)
+        recent.add(still, 11_000L)
+        assertEquals(still, recent.strongest(11_000L))
+        assertNull(RecentStates().strongest(0L))
+    }
+
+    @Test
+    fun recent_tieGoesToTheNewest() {
+        val recent = RecentStates()
+        recent.add(ContextState(Kind.AT_PLACE, "Home"), 0L)
+        recent.add(ContextState(Kind.AT_PLACE, "Shop"), 4_000L)
+        assertEquals("Shop", recent.strongest(5_000L)?.place)
+    }
+
     @Test
     fun differentPlaces_areDifferentStates() {
         val smoother = ContextSmoother()
