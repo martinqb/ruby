@@ -18,13 +18,13 @@ import com.martin.ruby.MainActivity
 import com.martin.ruby.R
 import com.martin.ruby.bluetooth.CarBluetooth
 import com.martin.ruby.data.CarSettings
+import com.martin.ruby.decision.ContextEngine
+import com.martin.ruby.decision.ContextState
+import com.martin.ruby.decision.ContextStatus
 import com.martin.ruby.location.GpsReader
 import com.martin.ruby.location.LocationSensing
-import com.martin.ruby.location.LocationStatus
 import com.martin.ruby.log.SensingLog
-import com.martin.ruby.motion.Motion
 import com.martin.ruby.motion.MotionSensor
-import com.martin.ruby.motion.MotionStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -39,7 +39,7 @@ import kotlinx.coroutines.launch
  *
  * A foreground service is Android's approved way to run continuously: the notification
  * tells the user something is running, and in return Android doesn't kill the app.
- * Motion sensing (Phase 3) and GPS (Phase 4) run from here too.
+ * Motion sensing (Phase 3), GPS (Phase 4) and the decision engine (Phase 5) run from here too.
  */
 class SensingService : Service() {
 
@@ -47,6 +47,7 @@ class SensingService : Service() {
     private var watchJob: Job? = null
     private var motionSensor: MotionSensor? = null
     private var locationSensing: LocationSensing? = null
+    private var contextEngine: ContextEngine? = null
     private var shown = NotificationState()
     private var lastStartMessage: String? = null
 
@@ -92,19 +93,8 @@ class SensingService : Service() {
             // Keep the notification text in step with the current state. Only the labels
             // are compared, so the notification doesn't redraw every 5 seconds.
             watchJob = scope.launch {
-                combine(
-                    settings.car,
-                    settings.carConnected,
-                    MotionStatus.reading,
-                    LocationStatus.reading,
-                ) { car, connected, motion, location ->
-                    NotificationState(
-                        driving = car != null && connected,
-                        carName = car?.name,
-                        motion = motion?.motion,
-                        gpsVehicle = location.inVehicle,
-                        place = location.place,
-                    )
+                combine(settings.car, ContextStatus.reading) { car, context ->
+                    NotificationState(state = context?.state, carName = car?.name)
                 }
                     .distinctUntilChanged()
                     .collect { state ->
@@ -117,6 +107,11 @@ class SensingService : Service() {
         // Starts motion sensing, or picks up a newly granted Physical activity permission.
         val sensor = motionSensor ?: MotionSensor(this).also { motionSensor = it }
         sensor.start()
+
+        // The decision engine (Phase 5) turns everything below into one current state.
+        if (contextEngine == null) {
+            contextEngine = ContextEngine(this, scope).also { it.start() }
+        }
 
         // Start GPS sensing whenever precise location is allowed. This used to wait for the
         // service's "location" type to be accepted, and if Android refused that, GPS never
@@ -137,6 +132,7 @@ class SensingService : Service() {
     override fun onDestroy() {
         motionSensor?.stop()
         locationSensing?.stop()
+        contextEngine?.stop()
         scope.cancel()
         super.onDestroy()
     }
@@ -169,11 +165,9 @@ class SensingService : Service() {
 
     /** What the notification shows. */
     private data class NotificationState(
-        val driving: Boolean = false,
+        /** The decision engine's state, or null before it has started. */
+        val state: ContextState? = null,
         val carName: String? = null,
-        val motion: Motion? = null,
-        val gpsVehicle: Boolean = false,
-        val place: String? = null,
     )
 
     private fun buildNotification(state: NotificationState): Notification {
@@ -183,14 +177,12 @@ class SensingService : Service() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        val carStatus = when {
-            state.driving && state.carName != null -> "Driving (${state.carName})"
-            state.driving -> "Driving"
-            else -> "Not driving"
+        val status = when {
+            state.state == null -> "Starting…"
+            state.state.kind == ContextState.Kind.DRIVING && state.carName != null ->
+                "Driving (${state.carName})"
+            else -> state.state.label
         }
-        val movement = if (state.gpsVehicle) "In a vehicle (GPS)" else state.motion?.label
-        val status = listOfNotNull(carStatus, movement, state.place?.let { "At $it" })
-            .joinToString(" · ")
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)

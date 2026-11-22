@@ -28,6 +28,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.martin.ruby.data.Car
+import com.martin.ruby.decision.ContextReading
+import com.martin.ruby.decision.ContextState
 import com.martin.ruby.location.LocationReading
 import com.martin.ruby.log.LogEntry
 import com.martin.ruby.motion.Motion
@@ -42,6 +44,8 @@ import java.util.Locale
 data class MainUiState(
     val car: Car? = null,
     val driving: Boolean = false,
+    /** The decision engine's state, or null while background sensing isn't running. */
+    val context: ContextReading? = null,
     val motion: MotionReading? = null,
     val location: LocationReading = LocationReading(),
     val savedPlaceCount: Int = 0,
@@ -79,12 +83,7 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(
-            text = if (state.driving) "Driving" else "Not driving",
-            style = MaterialTheme.typography.displayMedium,
-            fontWeight = FontWeight.Bold,
-            color = if (state.driving) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-        )
+        ContextHeadline(state)
         Spacer(Modifier.height(8.dp))
         Text(
             text = if (state.car == null) "No car chosen yet" else "Car: ${state.car.name}",
@@ -179,6 +178,31 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
         HorizontalDivider()
         Spacer(Modifier.height(16.dp))
         SensingLogSection(state, actions)
+    }
+}
+
+/**
+ * The one current state from the decision engine, with why and since when, plus any new
+ * state waiting to hold long enough. Without background sensing, only the car can be sensed.
+ */
+@Composable
+private fun ContextHeadline(state: MainUiState) {
+    val context = state.context
+    val driving = context?.state?.kind?.let { it == ContextState.Kind.DRIVING } ?: state.driving
+    Text(
+        text = context?.state?.label ?: if (state.driving) "Driving" else "Not driving",
+        style = MaterialTheme.typography.displayMedium,
+        fontWeight = FontWeight.Bold,
+        textAlign = TextAlign.Center,
+        color = if (driving) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+    )
+    if (context == null) return
+    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val since = if (context.state.kind == ContextState.Kind.UNKNOWN) "" else
+        ", since ${timeFormat.format(Date(context.sinceMillis))}"
+    Details(context.reason.replaceFirstChar { it.uppercase() } + since)
+    context.pending?.let { next ->
+        Details("Changing to ${next.label} if it holds for ${context.pendingHoldMillis / 1000} s")
     }
 }
 
@@ -298,6 +322,11 @@ private fun MainScreenPreview() {
             state = MainUiState(
                 car = Car("00:11:22:33:44:55", "Corolla"),
                 driving = true,
+                context = ContextReading(
+                    state = ContextState(ContextState.Kind.DRIVING),
+                    reason = "car Bluetooth connected",
+                    sinceMillis = 1_700_000_000_000,
+                ),
                 motion = MotionReading(
                     Motion.IN_VEHICLE,
                     variation = 0.42f,

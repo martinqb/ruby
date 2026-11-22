@@ -28,6 +28,7 @@ import com.martin.ruby.bluetooth.CarBluetooth
 import com.martin.ruby.data.CarSettings
 import com.martin.ruby.data.Place
 import com.martin.ruby.data.PlaceStore
+import com.martin.ruby.decision.ContextStatus
 import com.martin.ruby.location.GpsReader
 import com.martin.ruby.location.LocationStatus
 import com.martin.ruby.log.SensingLog
@@ -85,6 +86,7 @@ class MainActivity : ComponentActivity() {
                 val carConnected by settings.carConnected.collectAsState(initial = false)
                 val backgroundSensing by settings.backgroundSensing.collectAsState(initial = true)
                 val motion by MotionStatus.reading.collectAsState()
+                val context by ContextStatus.reading.collectAsState()
                 val location by LocationStatus.reading.collectAsState()
                 val places by placeStore.places.collectAsState(initial = emptyList())
                 val log by SensingLog.entries.collectAsState()
@@ -130,6 +132,7 @@ class MainActivity : ComponentActivity() {
                             state = MainUiState(
                                 car = car,
                                 driving = car != null && carConnected,
+                                context = context,
                                 motion = motion,
                                 location = location,
                                 savedPlaceCount = places.size,
