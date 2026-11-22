@@ -1,6 +1,7 @@
 package com.martin.ruby.memory
 
 import android.content.Context
+import androidx.room.AutoMigration
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
@@ -61,6 +62,34 @@ interface MemoryDao {
     @Query("DELETE FROM messages")
     suspend fun deleteAll()
 
+    @Insert
+    suspend fun insertAll(messages: List<MemoryMessage>): List<Long>
+
+    /** The notes made by [MemoryStore.addTestNotes]. */
+    @Query("DELETE FROM messages WHERE context = 'Test' AND text LIKE 'Test note %'")
+    suspend fun deleteTestNotes(): Int
+
+    @Query("DELETE FROM messages WHERE id IN (:ids)")
+    suspend fun deleteIds(ids: List<Long>)
+
+    /**
+     * The oldest messages that may be packed away: never the newest [keepNewest], and not
+     * ones the user just brought back.
+     */
+    @Query(
+        """
+        SELECT * FROM messages
+        WHERE id NOT IN (SELECT id FROM messages ORDER BY timeMillis DESC, id DESC LIMIT :keepNewest)
+        AND NOT EXISTS (
+            SELECT 1 FROM memory_archive a WHERE a.state = 'back'
+            AND messages.id BETWEEN a.backFirstId AND a.backLastId AND a.heldUntilMillis > :now
+        )
+        ORDER BY timeMillis, id
+        LIMIT :limit
+        """
+    )
+    suspend fun packable(keepNewest: Int, now: Long, limit: Int): List<MemoryMessage>
+
     /** Full-text search; build the query with [MemoryDatabase.searchQuery]. */
     @RawQuery(observedEntities = [MemoryMessage::class])
     fun search(query: SupportSQLiteQuery): Flow<List<MemoryMessage>>
@@ -74,10 +103,18 @@ interface MemoryDao {
  * the message text, kept up to date by triggers. Room doesn't know about FTS5 tables,
  * so they're made with plain SQL when the database opens.
  */
-@Database(entities = [MemoryMessage::class], version = 1, exportSchema = true)
+@Database(
+    entities = [MemoryMessage::class, MemoryArchive::class],
+    version = 2,
+    exportSchema = true,
+    // Version 2 added memory_archive. Room works out the change from the saved schemas.
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
+)
 abstract class MemoryDatabase : RoomDatabase() {
 
     abstract fun dao(): MemoryDao
+
+    abstract fun archiveDao(): ArchiveDao
 
     companion object {
         const val FILE_NAME = "memory.db"

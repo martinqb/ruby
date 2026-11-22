@@ -109,17 +109,27 @@ object BackupCrypto {
         val header = readHeader(backup)
         val backupKey = unlockBackupKey(header, secret)
             ?: throw CantOpen("That passphrase or recovery key doesn't open this backup.")
+        return Opened(decrypt(backup, header, backupKey, "The backup is damaged or has been changed."), backupKey, header.bytes)
+    }
+
+    /**
+     * Opens a file sealed with a backup key the phone already has, without the passphrase.
+     * Throws [CantOpen] if it was sealed with a different key (an earlier setup) or is damaged.
+     */
+    fun openWithKey(backup: ByteArray, backupKey: ByteArray): ByteArray =
+        decrypt(backup, readHeader(backup), backupKey, "This was locked with a different passphrase, or is damaged.")
+
+    private fun decrypt(backup: ByteArray, header: Header, backupKey: ByteArray, failure: String): ByteArray {
         val iv = backup.copyOfRange(HEADER_BYTES, HEADER_BYTES + IV_BYTES)
-        val contents = try {
+        return try {
             Cipher.getInstance("AES/GCM/NoPadding").run {
                 init(Cipher.DECRYPT_MODE, SecretKeySpec(backupKey, "AES"), GCMParameterSpec(TAG_BITS, iv))
                 updateAAD(header.bytes)
                 doFinal(backup, HEADER_BYTES + IV_BYTES, backup.size - HEADER_BYTES - IV_BYTES)
             }
         } catch (e: GeneralSecurityException) {
-            throw CantOpen("The backup is damaged or has been changed.")
+            throw CantOpen(failure)
         }
-        return Opened(contents, backupKey, header.bytes)
     }
 
     // The header

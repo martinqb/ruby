@@ -63,6 +63,28 @@ class BackupManager(context: Context) {
 
     class Backup(val bytes: ByteArray, val messageCount: Int)
 
+    /**
+     * Encrypts other data (memories moved to Drive by the storage limit) the same way as a
+     * backup, so the passphrase or recovery key can open it on a new phone too.
+     */
+    suspend fun seal(contents: ByteArray): ByteArray {
+        val (backupKey, header) = withContext(Dispatchers.IO) {
+            KeystoreBox.load(WRAP_ALIAS, keyFile) to headerFile.readBytes()
+        }
+        return withContext(Dispatchers.Default) { BackupCrypto.seal(header, backupKey, contents) }
+    }
+
+    /**
+     * Opens something [seal] made. With no [secret], uses the key on this phone; that fails
+     * with [BackupCrypto.CantOpen] if it was sealed under an earlier passphrase, and then
+     * the old passphrase or recovery key opens it.
+     */
+    suspend fun openSealed(sealed: ByteArray, secret: String? = null): ByteArray {
+        if (secret != null) return withContext(Dispatchers.Default) { BackupCrypto.open(sealed, secret.trim()).contents }
+        val backupKey = withContext(Dispatchers.IO) { KeystoreBox.load(WRAP_ALIAS, keyFile) }
+        return withContext(Dispatchers.Default) { BackupCrypto.openWithKey(sealed, backupKey) }
+    }
+
     /** A backup that's been unlocked and checked, waiting for the user to confirm. */
     class Unlocked internal constructor(
         val createdMillis: Long,

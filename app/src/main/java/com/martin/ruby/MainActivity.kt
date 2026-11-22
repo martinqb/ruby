@@ -46,12 +46,13 @@ import com.martin.ruby.ui.MainScreen
 import com.martin.ruby.ui.MainUiState
 import com.martin.ruby.ui.MemoryScreen
 import com.martin.ruby.ui.PlacesScreen
+import com.martin.ruby.ui.StorageScreen
 import com.martin.ruby.ui.theme.RubyTheme
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Which screen is showing. */
-private enum class Screen { MAIN, CAR_PICKER, PLACES, MEMORY, BACKUP }
+private enum class Screen { MAIN, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE }
 
 class MainActivity : ComponentActivity() {
 
@@ -73,6 +74,9 @@ class MainActivity : ComponentActivity() {
     /** Set when a notification (e.g. "approve Drive access again") asks for the Backup screen. */
     private var openBackupRequested by mutableStateOf(false)
 
+    /** Set when the "memory is full" notification asks for the Storage screen. */
+    private var openStorageRequested by mutableStateOf(false)
+
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
             onPermissionsChanged()
@@ -85,6 +89,7 @@ class MainActivity : ComponentActivity() {
         memoryStore = MemoryStore(applicationContext)
         backupManager = BackupManager(applicationContext)
         openBackupRequested = intent?.getBooleanExtra(EXTRA_OPEN_BACKUP, false) == true
+        openStorageRequested = intent?.getBooleanExtra(EXTRA_OPEN_STORAGE, false) == true
         checkPermissions()
 
         // Android's own backup can bring "nightly is on" to a new phone without the
@@ -113,13 +118,17 @@ class MainActivity : ComponentActivity() {
                 val places by placeStore.places.collectAsState(initial = emptyList())
                 val log by SensingLog.entries.collectAsState()
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
+                if (openStorageRequested) {
+                    openStorageRequested = false
+                    screen = Screen.STORAGE
+                }
                 if (openBackupRequested) {
                     openBackupRequested = false
                     screen = Screen.BACKUP
                 }
 
                 if (screen != Screen.MAIN) BackHandler {
-                    screen = if (screen == Screen.BACKUP) Screen.MEMORY else Screen.MAIN
+                    screen = if (screen == Screen.BACKUP || screen == Screen.STORAGE) Screen.MEMORY else Screen.MAIN
                 }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -145,12 +154,19 @@ class MainActivity : ComponentActivity() {
                         Screen.MEMORY -> MemoryScreen(
                             store = memoryStore,
                             onOpenBackup = { screen = Screen.BACKUP },
+                            onOpenStorage = { screen = Screen.STORAGE },
                             onBack = { screen = Screen.MAIN },
                             modifier = modifier,
                         )
 
                         Screen.BACKUP -> BackupScreen(
                             manager = backupManager,
+                            onBack = { screen = Screen.MEMORY },
+                            modifier = modifier,
+                        )
+
+                        Screen.STORAGE -> StorageScreen(
+                            store = memoryStore,
                             onBack = { screen = Screen.MEMORY },
                             modifier = modifier,
                         )
@@ -209,6 +225,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_BACKUP, false)) openBackupRequested = true
+        if (intent.getBooleanExtra(EXTRA_OPEN_STORAGE, false)) openStorageRequested = true
     }
 
     override fun onResume() {
@@ -328,5 +345,8 @@ class MainActivity : ComponentActivity() {
     companion object {
         /** Intent extra: open straight to the Backup screen. */
         const val EXTRA_OPEN_BACKUP = "com.martin.ruby.OPEN_BACKUP"
+
+        /** Intent extra: open straight to the memory Storage screen. */
+        const val EXTRA_OPEN_STORAGE = "com.martin.ruby.OPEN_STORAGE"
     }
 }

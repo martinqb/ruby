@@ -30,6 +30,24 @@ class BackupCryptoTest {
     }
 
     @Test
+    fun openWithKey_opensWithThePhonesKey() {
+        val (setup, file) = backup()
+        assertArrayEquals(contents, BackupCrypto.openWithKey(file, setup.backupKey))
+    }
+
+    @Test
+    fun openWithKey_fromAnEarlierSetup_isRefused_butItsPassphraseStillWorks() {
+        val (_, file) = backup()
+        val later = BackupCrypto.setUp(passphrase, rounds) // set up again: a new key
+        try {
+            BackupCrypto.openWithKey(file, later.backupKey)
+            fail("Expected CantOpen")
+        } catch (expected: BackupCrypto.CantOpen) {
+        }
+        assertArrayEquals(contents, BackupCrypto.open(file, passphrase).contents)
+    }
+
+    @Test
     fun passphrase_opensTheBackup() {
         val (_, file) = backup()
         assertArrayEquals(contents, BackupCrypto.open(file, passphrase).contents)

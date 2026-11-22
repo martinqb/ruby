@@ -31,7 +31,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import com.martin.ruby.memory.ArchiveSummary
+import com.martin.ruby.memory.MemoryArchive
+import com.martin.ruby.memory.MemoryLimit
 import com.martin.ruby.memory.MemoryMessage
+import com.martin.ruby.memory.StorageBudget
 import com.martin.ruby.memory.MemoryStore
 import com.martin.ruby.ui.theme.RubyTheme
 import kotlinx.coroutines.launch
@@ -48,6 +53,7 @@ import java.util.Date
 fun MemoryScreen(
     store: MemoryStore,
     onOpenBackup: () -> Unit,
+    onOpenStorage: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -61,10 +67,17 @@ fun MemoryScreen(
     }
     val messages by messagesFlow.collectAsState(initial = emptyList())
     val count by remember(store) { store.count() }.collectAsState(initial = 0)
+    val archives by remember(store) { store.archives() }.collectAsState(initial = emptyList())
+    val appContext = LocalContext.current.applicationContext
+    var usage by remember { mutableStateOf<MemoryLimit.Usage?>(null) }
+    LaunchedEffect(count, archives) { usage = runCatching { MemoryLimit.usage(appContext) }.getOrNull() }
 
     MemoryContent(
         messages = messages,
         count = count,
+        storage = usage?.let { storageLine(it, archives) },
+        archivedOnPhone = archives.filter { it.state == MemoryArchive.STATE_PHONE }.sumOf { it.messageCount },
+        archivedInDrive = archives.filter { it.state == MemoryArchive.STATE_DRIVE }.sumOf { it.messageCount },
         query = query,
         error = error,
         onQueryChange = { query = it },
@@ -72,6 +85,7 @@ fun MemoryScreen(
         onDelete = { message -> scope.launch { store.delete(message) } },
         onDeleteAll = { scope.launch { store.deleteAll() } },
         onOpenBackup = onOpenBackup,
+        onOpenStorage = onOpenStorage,
         onBack = onBack,
         modifier = modifier,
     )
@@ -81,6 +95,9 @@ fun MemoryScreen(
 private fun MemoryContent(
     messages: List<MemoryMessage>,
     count: Int,
+    storage: String?,
+    archivedOnPhone: Int,
+    archivedInDrive: Int,
     query: String,
     error: String?,
     onQueryChange: (String) -> Unit,
@@ -88,6 +105,7 @@ private fun MemoryContent(
     onDelete: (MemoryMessage) -> Unit,
     onDeleteAll: () -> Unit,
     onOpenBackup: () -> Unit,
+    onOpenStorage: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -98,6 +116,7 @@ private fun MemoryContent(
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text("Back") }
             Spacer(Modifier.weight(1f))
+            TextButton(onClick = onOpenStorage) { Text("Storage") }
             TextButton(onClick = onOpenBackup) { Text("Backup and restore") }
         }
         Text("Memory", style = MaterialTheme.typography.headlineSmall)
@@ -107,6 +126,17 @@ private fun MemoryContent(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        storage?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (query.isNotBlank() && archivedOnPhone + archivedInDrive > 0) {
+            Text(
+                "Search doesn't include ${archivedOnPhone + archivedInDrive} archived older messages. " +
+                    "Bring them back on the Storage screen to search them.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (error != null) {
             Spacer(Modifier.height(8.dp))
             Text(
@@ -173,7 +203,18 @@ private fun MemoryContent(
         AlertDialog(
             onDismissRequest = { confirmDeleteAll = false },
             title = { Text("Delete all memory?") },
-            text = { Text("All $count messages will be deleted from this phone. This can't be undone.") },
+            text = {
+                Text(
+                    buildString {
+                        append("All $count messages")
+                        if (archivedOnPhone > 0) append(", and $archivedOnPhone compressed older ones,")
+                        append(" will be deleted from this phone. This can't be undone.")
+                        if (archivedInDrive > 0) {
+                            append(" The $archivedInDrive older messages moved to Google Drive are kept there.")
+                        }
+                    }
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDeleteAll = false
@@ -202,6 +243,9 @@ private fun MemoryScreenPreview() {
                 MemoryMessage(1, 1_700_000_000_000, MemoryMessage.ROLE_USER, "Parked on level 3, row C.", "Driving"),
             ),
             count = 2,
+            storage = "Storage: 12 KB of 12.8 GB limit (0%).",
+            archivedOnPhone = 0,
+            archivedInDrive = 0,
             query = "",
             error = null,
             onQueryChange = {},
@@ -209,7 +253,16 @@ private fun MemoryScreenPreview() {
             onDelete = {},
             onDeleteAll = {},
             onOpenBackup = {},
+            onOpenStorage = {},
             onBack = {},
         )
     }
+}
+
+/** "Storage: 180 KB of 256 KB limit (70%) · 230 older messages archived." */
+private fun storageLine(usage: MemoryLimit.Usage, archives: List<ArchiveSummary>): String {
+    val percent = (usage.fraction * 100).toInt()
+    val archived = archives.sumOf { it.messageCount }
+    return "Storage: ${StorageBudget.describe(usage.usedBytes)} of ${StorageBudget.describe(usage.limitBytes)} " +
+        "limit ($percent%)" + if (archived > 0) " · $archived older messages archived." else "."
 }

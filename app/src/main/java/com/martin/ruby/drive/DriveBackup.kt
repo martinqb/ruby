@@ -42,12 +42,28 @@ class DriveBackup(context: Context, private val manager: BackupManager) {
         return Uploaded(file, backup.messageCount, deleted)
     }
 
-    /** The backups in Drive, newest first. */
+    /** The backups in Drive, newest first. Memories moved there by the storage limit aren't listed. */
     suspend fun list(token: String): List<DriveFile> =
-        withDrive(token) { drive -> drive.list().sortedByDescending { it.modifiedMillis } }
+        withDrive(token) { drive -> drive.list().filter { it.isBackup }.sortedByDescending { it.modifiedMillis } }
 
     suspend fun download(token: String, file: DriveFile): ByteArray =
         withDrive(token) { drive -> drive.download(file.id) }
+
+    // Any file, for memories the storage limit moves to Drive
+
+    suspend fun uploadFile(token: String, name: String, bytes: ByteArray): DriveFile =
+        withDrive(token) { drive -> drive.upload(name, bytes) }
+
+    suspend fun downloadFile(token: String, id: String): ByteArray =
+        withDrive(token) { drive -> drive.download(id) }
+
+    suspend fun deleteFile(token: String, id: String) =
+        withDrive(token) { drive -> drive.delete(id) }
+
+    companion object {
+        /** Names of files holding memories the storage limit moved to Drive. */
+        const val ARCHIVE_PREFIX = "ruby-archive-"
+    }
 
     private suspend fun <T> withDrive(token: String, block: suspend (DriveClient) -> T): T = try {
         block(DriveClient(token))

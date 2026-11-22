@@ -24,6 +24,7 @@ import com.martin.ruby.R
 import com.martin.ruby.drive.DriveAuth
 import com.martin.ruby.drive.DriveBackup
 import com.martin.ruby.log.SensingLog
+import com.martin.ruby.memory.MemoryLimit
 import kotlinx.coroutines.CancellationException
 import java.time.Duration
 import java.time.ZonedDateTime
@@ -129,6 +130,8 @@ class NightlyBackupWorker(context: Context, params: WorkerParameters) : Coroutin
             return Result.success()
         }
         return try {
+            // The phone may have filled up since memory last grew, so check the limit first.
+            runCatching { MemoryLimit.enforce(applicationContext) }
             val token = DriveAuth.silentToken(applicationContext)
             DriveBackup(applicationContext, manager).backUp(token) // records the success
             NightlyBackup.clearApprovalNotice(applicationContext)

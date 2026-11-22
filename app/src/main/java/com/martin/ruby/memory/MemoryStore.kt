@@ -2,7 +2,9 @@ package com.martin.ruby.memory
 
 import android.content.Context
 import android.os.SystemClock
+import androidx.room.withTransaction
 import com.martin.ruby.decision.ContextStatus
+import com.martin.ruby.drive.DriveArchiveCloud
 import com.martin.ruby.log.SensingLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -65,9 +67,55 @@ class MemoryStore(context: Context) {
         dao().insert(
             MemoryMessage(timeMillis = System.currentTimeMillis(), role = role, text = text, context = context)
         )
+        MemoryLimit.check(appContext)
     }
 
     suspend fun delete(message: MemoryMessage) = dao().delete(message.id)
 
-    suspend fun deleteAll() = dao().deleteAll()
+    /**
+     * Deletes every message on the phone, and the compressed bundles kept on the phone.
+     * Memories moved to Google Drive stay there.
+     */
+    suspend fun deleteAll() = withContext(Dispatchers.IO) {
+        val db = MemoryDatabase.get(appContext)
+        db.withTransaction {
+            db.dao().deleteAll()
+            db.archiveDao().deleteAllOnPhone()
+        }
+        MemoryLimit.check(appContext)
+    }
+
+    /** Bundles of older messages packed away by the storage limit, oldest first. */
+    fun archives(): Flow<List<ArchiveSummary>> = flow {
+        val dao = try {
+            withContext(Dispatchers.IO) { MemoryDatabase.get(appContext).archiveDao() }
+        } catch (e: Exception) {
+            emit(emptyList())
+            return@flow
+        }
+        emitAll(dao.stored())
+    }.flowOn(Dispatchers.IO)
+
+    /**
+     * Puts an archived bundle back into memory. Throws [MemoryArchiver.NeedsOldSecret] if it
+     * needs an earlier passphrase; pass it as [secret] then.
+     */
+    suspend fun bringBack(archiveId: Long, secret: String? = null): Int {
+        val count = MemoryLimit.archiver(appContext).bringBack(
+            archiveId, cloud = { DriveArchiveCloud.connect(appContext) }, secret = secret,
+        )
+        SensingLog.add("Brought back $count archived messages into memory.")
+        MemoryLimit.check(appContext)
+        return count
+    }
+
+    /** For testing the storage limit: saves [count] made-up notes of about 600 characters. */
+    suspend fun addTestNotes(count: Int) {
+        dao().insertAll(TestNotes.make(count, System.currentTimeMillis()))
+        SensingLog.add("Added $count test notes to memory.")
+        MemoryLimit.check(appContext)
+    }
+
+    suspend fun deleteTestNotes(): Int = dao().deleteTestNotes().also { MemoryLimit.check(appContext) }
+
 }
