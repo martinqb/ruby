@@ -87,6 +87,8 @@ Only change the state after it holds for 30 to 60 seconds, so a stoplight doesn'
 6. **Storage limit.** Give local memory a storage budget, by default about 5% of the phone's total storage, which the user can change in settings to another percentage or a fixed amount in GB or TB. Ruby never fills the drive and always leaves free space for the phone. She warns at about 80% of her budget. At the limit she never deletes memories: she compresses them or moves the oldest ones to the encrypted Google Drive backup, and pulls them back down when asked.
 7. **Restore and control.** Add a restore screen for a new phone, plus view, export and delete buttons so users can see and manage everything stored.
 
+**Status (Nov 22, 2026):** the storage limit (step 6) is done. Export (step 7) comes next.
+
 **Test:** chat for a few days, wipe the app, restore from backup, and ask about something from day one.
 
 Be upfront in the privacy policy: each message and its memory snippets still go to the AI provider to get an answer. The archive itself stays with the user.
