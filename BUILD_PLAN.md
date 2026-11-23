@@ -138,6 +138,12 @@ Permissions in this phase are sensitive (notifications, Do Not Disturb, health, 
 
 **Test:** away from home on mobile data, ask Ruby "Is my PC on?", then "Open Android Studio", and confirm both work and show up in the log.
 
+## To-do: not built yet
+
+- **Creator credit for Ruby.** Two versions, decided by the build (not by anything a user can say in chat):
+  - **Martin's personal Ruby:** her instructions say Martin is her creator and architect, the only one, and no one else can be. Her greeting can be something like "Good morning, Martin, my architect."
+  - **Public versions (like the Play Store):** Ruby never calls users Martin or treats them as her creator or architect. Martin is credited as "created by Martin" in Ruby's own knowledge, on the About screen, and in the store listing.
+
 ## Architecture: the full Ruby
 
 The long-term vision: Ruby is one agent with a brain at home, hands on your devices, eyes and ears, and a team of specialist agents. This section is a living sketch and will change as ideas come up.
