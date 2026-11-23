@@ -34,10 +34,13 @@ class MemoryExportDeviceTest {
         db = MemoryDatabase.open(context, TEST_FILE)
         archiver = MemoryArchiver(db, context.getDatabasePath(TEST_FILE))
         originals = TestNotes.make(200, 5_000_000L, java.util.Random(3))
-        db.dao().insertAll(originals)
-        // Pack all but the newest into bundles, then move the oldest bundle to Drive.
+        // The older half: packed into a bundle that's moved to Drive.
+        db.dao().insertAll(originals.take(100))
         archiver.enforce(1) { throw CloudUnavailable("not now") }
         archiver.moveOldestToDrive { drive }
+        // The newer half: packed into a bundle that stays on the phone, all but the newest.
+        db.dao().insertAll(originals.drop(100))
+        archiver.enforce(1) { throw CloudUnavailable("not now") }
         Unit
     }
 
