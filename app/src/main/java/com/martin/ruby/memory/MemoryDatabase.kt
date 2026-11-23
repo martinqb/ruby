@@ -117,12 +117,12 @@ interface MemoryDao {
  * so they're made with plain SQL when the database opens.
  */
 @Database(
-    entities = [MemoryMessage::class, MemoryArchive::class, Reminder::class],
-    version = 3,
+    entities = [MemoryMessage::class, MemoryArchive::class, Reminder::class, DaySummary::class],
+    version = 4,
     exportSchema = true,
     // Version 2 added memory_archive. Room works out the change from the saved schemas.
-    // Version 3 added reminders.
-    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
+    // Version 3 added reminders. Version 4 added summaries.
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3), AutoMigration(from = 3, to = 4)],
 )
 abstract class MemoryDatabase : RoomDatabase() {
 
@@ -131,6 +131,8 @@ abstract class MemoryDatabase : RoomDatabase() {
     abstract fun archiveDao(): ArchiveDao
 
     abstract fun reminderDao(): ReminderDao
+
+    abstract fun summaryDao(): SummaryDao
 
     companion object {
         const val FILE_NAME = "memory.db"
@@ -255,9 +257,21 @@ abstract class MemoryDatabase : RoomDatabase() {
             """.trimIndent(),
             arrayOf(fts),
         )
+
+        /** Full-text search of day summaries, best matches first. */
+        fun summarySearchQuery(fts: String, limit: Int): SupportSQLiteQuery = SimpleSQLiteQuery(
+            """
+            SELECT summaries.* FROM summaries
+            JOIN summaries_fts ON summaries.id = summaries_fts.rowid
+            WHERE summaries_fts MATCH ?
+            ORDER BY bm25(summaries_fts)
+            LIMIT $limit
+            """.trimIndent(),
+            arrayOf(fts),
+        )
     }
 
-    /** Makes the FTS5 index and the triggers that keep it in step with `messages`. */
+    /** Makes the FTS5 indexes, and the triggers that keep them in step with their tables. */
     private object FullTextSearch : Callback() {
         override fun onOpen(db: SupportSQLiteDatabase) {
             // "IF NOT EXISTS" so this is safe on every open, including after a restore.
@@ -277,6 +291,25 @@ abstract class MemoryDatabase : RoomDatabase() {
                 "CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN " +
                     "INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.id, old.text); " +
                     "INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text); END"
+            )
+
+            // The same for day summaries (database version 4 and later).
+            db.execSQL(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS summaries_fts USING fts5(" +
+                    "text, content='summaries', content_rowid='id', tokenize='porter unicode61')"
+            )
+            db.execSQL(
+                "CREATE TRIGGER IF NOT EXISTS summaries_ai AFTER INSERT ON summaries BEGIN " +
+                    "INSERT INTO summaries_fts(rowid, text) VALUES (new.id, new.text); END"
+            )
+            db.execSQL(
+                "CREATE TRIGGER IF NOT EXISTS summaries_ad AFTER DELETE ON summaries BEGIN " +
+                    "INSERT INTO summaries_fts(summaries_fts, rowid, text) VALUES ('delete', old.id, old.text); END"
+            )
+            db.execSQL(
+                "CREATE TRIGGER IF NOT EXISTS summaries_au AFTER UPDATE ON summaries BEGIN " +
+                    "INSERT INTO summaries_fts(summaries_fts, rowid, text) VALUES ('delete', old.id, old.text); " +
+                    "INSERT INTO summaries_fts(rowid, text) VALUES (new.id, new.text); END"
             )
         }
     }

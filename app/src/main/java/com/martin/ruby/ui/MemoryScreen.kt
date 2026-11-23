@@ -58,6 +58,7 @@ fun MemoryScreen(
     onOpenStorage: () -> Unit,
     onOpenExport: () -> Unit,
     onBack: () -> Unit,
+    onOpenSummaries: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
@@ -91,6 +92,7 @@ fun MemoryScreen(
         onOpenStorage = onOpenStorage,
         onOpenExport = onOpenExport,
         onBack = onBack,
+        onOpenSummaries = onOpenSummaries,
         modifier = modifier,
     )
 }
@@ -112,6 +114,7 @@ private fun MemoryContent(
     onOpenStorage: () -> Unit,
     onOpenExport: () -> Unit,
     onBack: () -> Unit,
+    onOpenSummaries: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var draft by rememberSaveable { mutableStateOf("") }
@@ -123,6 +126,7 @@ private fun MemoryContent(
             // Wraps onto a second line on narrow phones.
             FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = onOpenStorage) { Text("Storage") }
+                TextButton(onClick = onOpenSummaries) { Text("Summaries") }
                 TextButton(onClick = onOpenExport) { Text("Export") }
                 TextButton(onClick = onOpenBackup) { Text("Backup and restore") }
             }

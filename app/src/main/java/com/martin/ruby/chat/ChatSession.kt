@@ -116,7 +116,7 @@ object ChatSession {
                 fromUser = true,
                 text = message,
                 // The reminders as they are right now, so Ruby never goes by stale tool results.
-                sent = ClaudeChat.compose(message, label, now, currentReminders(appContext), MemoryRecall.format(memories)),
+                sent = ClaudeChat.compose(message, label, now, currentReminders(appContext), MemoryRecall.formatRecalled(memories)),
                 memoriesUsed = memories.size,
             )
             _ui.update { it.copy(turns = it.turns.dropLast(1) + turn) }
@@ -169,7 +169,7 @@ object ChatSession {
     }
 
     /** Related past messages, or none if memory can't be searched (the chat still works). */
-    private suspend fun recall(memory: MemoryStore, message: String): List<MemoryMessage> = try {
+    private suspend fun recall(memory: MemoryStore, message: String): List<MemoryRecall.Recalled> = try {
         memory.recall(message, exclude = conversationIds.toSet()).also {
             if (it.isNotEmpty()) SensingLog.add("Chat: sending ${it.size} related memories along.")
         }
