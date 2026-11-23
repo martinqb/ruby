@@ -68,6 +68,7 @@ data class MainActions(
     val onAllowLocation: () -> Unit = {},
     val onAllowLocationAllTheTime: () -> Unit = {},
     val onOpenPlaces: () -> Unit = {},
+    val onOpenChat: () -> Unit = {},
     val onOpenMemory: () -> Unit = {},
     val onTestGps: () -> Unit = {},
     val onClearLog: () -> Unit = {},
@@ -97,6 +98,9 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
             Spacer(Modifier.height(16.dp))
             LocationInfo(state)
         }
+        Spacer(Modifier.height(24.dp))
+        // Chat needs no sensing permissions, so it's offered before them.
+        Button(onClick = actions.onOpenChat) { Text("Chat with Ruby") }
         Spacer(Modifier.height(32.dp))
 
         if (!state.hasBluetoothPermission) {

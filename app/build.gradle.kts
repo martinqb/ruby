@@ -64,6 +64,8 @@ dependencies {
     implementation(libs.play.services.auth)
     // Phase 6: the nightly backup while charging on Wi-Fi.
     implementation(libs.androidx.work.runtime.ktx)
+    // Chatting with Claude through Anthropic's API.
+    implementation(libs.anthropic.java)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

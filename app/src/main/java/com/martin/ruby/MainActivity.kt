@@ -28,6 +28,7 @@ import com.martin.ruby.backup.BackupManager
 import com.martin.ruby.backup.BackupStatusStore
 import com.martin.ruby.backup.NightlyBackup
 import com.martin.ruby.bluetooth.CarBluetooth
+import com.martin.ruby.chat.ChatSession
 import com.martin.ruby.data.CarSettings
 import com.martin.ruby.data.Place
 import com.martin.ruby.data.PlaceStore
@@ -41,6 +42,8 @@ import com.martin.ruby.motion.MotionStatus
 import com.martin.ruby.sensing.BackgroundSensing
 import com.martin.ruby.ui.BackupScreen
 import com.martin.ruby.ui.CarPickerScreen
+import com.martin.ruby.ui.ChatActions
+import com.martin.ruby.ui.ChatScreen
 import com.martin.ruby.ui.MainActions
 import com.martin.ruby.ui.MainScreen
 import com.martin.ruby.ui.MainUiState
@@ -53,7 +56,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Which screen is showing. */
-private enum class Screen { MAIN, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT }
+private enum class Screen { MAIN, CHAT, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT }
 
 class MainActivity : ComponentActivity() {
 
@@ -92,6 +95,7 @@ class MainActivity : ComponentActivity() {
         openBackupRequested = intent?.getBooleanExtra(EXTRA_OPEN_BACKUP, false) == true
         openStorageRequested = intent?.getBooleanExtra(EXTRA_OPEN_STORAGE, false) == true
         checkPermissions()
+        ChatSession.checkKey(applicationContext)
 
         // Android's own backup can bring "nightly is on" to a new phone without the
         // scheduled job, so make sure it's scheduled. Scheduling again changes nothing.
@@ -118,6 +122,7 @@ class MainActivity : ComponentActivity() {
                 val location by LocationStatus.reading.collectAsState()
                 val places by placeStore.places.collectAsState(initial = emptyList())
                 val log by SensingLog.entries.collectAsState()
+                val chat by ChatSession.ui.collectAsState()
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
                 if (openStorageRequested) {
                     openStorageRequested = false
@@ -151,6 +156,20 @@ class MainActivity : ComponentActivity() {
                                 modifier = modifier,
                             )
                         }
+
+                        Screen.CHAT -> ChatScreen(
+                            ui = chat,
+                            context = context?.state?.label,
+                            actions = ChatActions(
+                                onSend = { text -> ChatSession.send(applicationContext, text) },
+                                onSaveKey = { key -> ChatSession.saveKey(applicationContext, key) },
+                                onForgetKey = { ChatSession.forgetKey(applicationContext) },
+                                onNewConversation = ChatSession::newConversation,
+                                onDismissError = ChatSession::dismissError,
+                                onBack = { screen = Screen.MAIN },
+                            ),
+                            modifier = modifier,
+                        )
 
                         Screen.MEMORY -> MemoryScreen(
                             store = memoryStore,
@@ -218,6 +237,7 @@ class MainActivity : ComponentActivity() {
                                 onAllowLocation = ::requestLocation,
                                 onAllowLocationAllTheTime = ::requestBackgroundLocation,
                                 onOpenPlaces = { screen = Screen.PLACES },
+                                onOpenChat = { screen = Screen.CHAT },
                                 onOpenMemory = { screen = Screen.MEMORY },
                                 onTestGps = { BackgroundSensing.testGps(this) },
                                 onClearLog = SensingLog::clear,
