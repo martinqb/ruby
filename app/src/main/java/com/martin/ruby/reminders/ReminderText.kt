@@ -16,6 +16,26 @@ object ReminderText {
     fun time(millis: Long, zone: ZoneId = ZoneId.systemDefault()): String =
         SHOWN.format(Instant.ofEpochMilli(millis).atZone(zone))
 
+    /** At most this many reminders go in [snapshot]; the rest are counted. */
+    const val SNAPSHOT_MAX = 20
+
+    /**
+     * The reminders waiting right now, for the note on each chat message, e.g.
+     * "Waiting reminders: 3: Check the oven (Mon, Nov 23, 2026, 1:25 PM); 4: Buy milk (on
+     * arriving at Store)". Read fresh for every message, so it's never out of date the way
+     * earlier tool results in the conversation can be.
+     */
+    fun snapshot(pending: List<Reminder>, zone: ZoneId = ZoneId.systemDefault()): String {
+        val waiting = pending.filter { it.state == Reminder.STATE_PENDING }
+        if (waiting.isEmpty()) return "Waiting reminders: none."
+        val shown = waiting.take(SNAPSHOT_MAX).joinToString("; ") { r ->
+            val whenText = r.place?.let { "on arriving at $it" } ?: time(r.dueMillis!!, zone)
+            "${r.id}: ${r.text.replace(Regex("\\s+"), " ").trim()} ($whenText)"
+        }
+        val more = waiting.size - SNAPSHOT_MAX
+        return "Waiting reminders: $shown" + if (more > 0) "; and $more more (use list_reminders)." else "."
+    }
+
     /** Two time reminders this close together count as the same time. */
     const val SAME_TIME_MILLIS = 2 * 60_000L
 

@@ -245,8 +245,13 @@ class ClaudeChat(apiKey: String) {
                 "time is unclear (\"later\", \"tonight\"), pick a sensible one and say which, or ask if it " +
                 "matters. After setting one, confirm it briefly in plain words. Only say a reminder is set " +
                 "once the tool says so. Tool calls and results earlier in this conversation really happened: " +
-                "don't set a reminder again because you're unsure whether it went through; check with " +
-                "list_reminders instead. Reminders don't repeat yet.\n\n" +
+                "don't set a reminder again because you're unsure whether it went through. But they can be " +
+                "out of date: since then a reminder may have gone off, been snoozed, or been cancelled, here " +
+                "or on the phone's Reminders screen. Each of the user's messages carries a note, \"Waiting " +
+                "reminders: ...\", read from the phone just before it was sent. That note on the newest message " +
+                "is the truth. Before saying anything about whether a reminder is set, when it is, or that it's " +
+                "coming up, check that note (or call list_reminders); never go by earlier messages. If a " +
+                "reminder isn't in the note, it isn't waiting. Reminders don't repeat yet.\n\n" +
                 "Apart from reminders, Ruby can only talk for now: she can't set alarms or timers, send " +
                 "messages, make calls, open apps, change phone settings, or do anything else outside this " +
                 "chat. Don't offer to do those things or say you've done them. If the user asks for one, say " +
@@ -256,16 +261,20 @@ class ClaudeChat(apiKey: String) {
                 "Answer in plain text; the chat screen doesn't show Markdown."
 
         /**
-         * What's sent for a user message: the context label and time, then any memories,
-         * then what they typed, e.g. "[Right now: Driving · Mon, Nov 23, 2026, 3:42 PM (America/New_York)]".
+         * What's sent for a user message: the context label and time, the reminders waiting
+         * right now (from [com.martin.ruby.reminders.ReminderText.snapshot], or null if they
+         * couldn't be read), then any memories, then what they typed, e.g.
+         * "[Right now: Driving · Mon, Nov 23, 2026, 3:42 PM (America/New_York)]".
          */
-        fun compose(text: String, context: String?, now: String, memories: String?): String = buildString {
-            append("[Right now: ")
-            if (context != null) append("$context · ")
-            append("$now]\n")
-            if (memories != null) append("[$memories]\n\n")
-            append(text)
-        }
+        fun compose(text: String, context: String?, now: String, reminders: String?, memories: String?): String =
+            buildString {
+                append("[Right now: ")
+                if (context != null) append("$context · ")
+                append("$now]\n")
+                if (reminders != null) append("[$reminders]\n")
+                if (memories != null) append("[$memories]\n\n")
+                append(text)
+            }
 
         private fun join(parts: List<String>): String = parts.filter { it.isNotEmpty() }.joinToString("\n\n")
 
