@@ -35,9 +35,12 @@ interface RubyVoice {
 
 /** The voices Ruby can use. A custom voice adds an entry here and a case in [create]. */
 enum class VoiceEngine(val label: String) {
+    /** Made on the phone by Kokoro; works offline. Ruby's default, once downloaded. */
+    KOKORO("Kokoro (on this phone, works offline)"),
     ANDROID("Android text-to-speech");
 
-    fun create(context: Context): RubyVoice = when (this) {
+    fun create(context: Context, prefs: VoicePrefs): RubyVoice = when (this) {
+        KOKORO -> KokoroVoice(context.applicationContext, prefs.kokoroSpeaker)
         ANDROID -> AndroidTtsVoice(context.applicationContext)
     }
 }

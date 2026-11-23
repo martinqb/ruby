@@ -17,7 +17,9 @@ enum class SpeakMode(val label: String, val explained: String) {
 
 data class VoicePrefs(
     val mode: SpeakMode = SpeakMode.AUTO,
-    val engine: VoiceEngine = VoiceEngine.ANDROID,
+    /** Kokoro (af_heart) is Ruby's default voice; Android text-to-speech is used until it's downloaded. */
+    val engine: VoiceEngine = VoiceEngine.KOKORO,
+    val kokoroSpeaker: KokoroSpeaker = KokoroSpeaker.HEART,
     val style: VoiceStyle = VoiceStyle(),
 )
 
@@ -26,7 +28,10 @@ class VoiceSettings(private val context: Context) {
 
     private object Keys {
         val MODE = stringPreferencesKey("voice_mode")
-        val ENGINE = stringPreferencesKey("voice_engine")
+        // A new key: before Kokoro, "voice_engine" always held the only choice there was
+        // (Android), which would otherwise keep everyone off Kokoro, the new default.
+        val ENGINE = stringPreferencesKey("voice_engine_2")
+        val KOKORO_SPEAKER = stringPreferencesKey("voice_kokoro_speaker")
         val SPEED = floatPreferencesKey("voice_speed")
         val PITCH = floatPreferencesKey("voice_pitch")
     }
@@ -34,7 +39,9 @@ class VoiceSettings(private val context: Context) {
     val prefs: Flow<VoicePrefs> = context.dataStore.data.map { p ->
         VoicePrefs(
             mode = p[Keys.MODE]?.let { name -> SpeakMode.entries.firstOrNull { it.name == name } } ?: SpeakMode.AUTO,
-            engine = p[Keys.ENGINE]?.let { name -> VoiceEngine.entries.firstOrNull { it.name == name } } ?: VoiceEngine.ANDROID,
+            engine = p[Keys.ENGINE]?.let { name -> VoiceEngine.entries.firstOrNull { it.name == name } } ?: VoiceEngine.KOKORO,
+            kokoroSpeaker = p[Keys.KOKORO_SPEAKER]?.let { name -> KokoroSpeaker.entries.firstOrNull { it.name == name } }
+                ?: KokoroSpeaker.HEART,
             style = VoiceStyle(speed = p[Keys.SPEED] ?: 1.0f, pitch = p[Keys.PITCH] ?: 1.0f),
         )
     }
@@ -43,6 +50,7 @@ class VoiceSettings(private val context: Context) {
         context.dataStore.edit { p ->
             p[Keys.MODE] = prefs.mode.name
             p[Keys.ENGINE] = prefs.engine.name
+            p[Keys.KOKORO_SPEAKER] = prefs.kokoroSpeaker.name
             p[Keys.SPEED] = prefs.style.speed
             p[Keys.PITCH] = prefs.style.pitch
         }
