@@ -14,6 +14,7 @@ import com.martin.ruby.reminders.ReminderTools
 import java.time.ZoneId
 import kotlinx.coroutines.flow.first
 import com.martin.ruby.voice.VoiceSession
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -83,14 +84,25 @@ object ChatSession {
     /** Memory ids of this conversation's messages, which recall leaves out (they're sent anyway). */
     private val conversationIds = mutableSetOf<Long>()
 
+    /**
+     * This conversation's tools, made once when it starts and sent unchanged with every
+     * message. Claude's earlier thinking is only valid against the exact tools it was made
+     * with; rebuilding them each message let them drift and broke the chat with a 400.
+     */
+    private var tools: ToolBox? = null
+
     /** Starts a fresh conversation. Memory keeps the old one, and can recall it from now on. */
     fun newConversation() {
         if (_ui.value.sending) return
         conversationIds.clear()
+        tools = null
         _ui.update { it.copy(turns = emptyList(), error = null) }
     }
 
     fun dismissError() = _ui.update { it.copy(error = null) }
+
+    /** Debug builds only: the next message is sent with a changed tool list (see [ClaudeChat.reply]). */
+    @Volatile var breakNextMessage = false
 
     /**
      * Sends [text]; returns false (and does nothing) if a reply is still coming. [spoken]
@@ -116,7 +128,9 @@ object ChatSession {
                 fromUser = true,
                 text = message,
                 // The reminders as they are right now, so Ruby never goes by stale tool results.
-                sent = ClaudeChat.compose(message, label, now, currentReminders(appContext), MemoryRecall.formatRecalled(memories)),
+                sent = ClaudeChat.compose(
+                    message, label, now, currentReminders(appContext), currentPlaces(appContext), MemoryRecall.formatRecalled(memories),
+                ),
                 memoriesUsed = memories.size,
             )
             _ui.update { it.copy(turns = it.turns.dropLast(1) + turn) }
@@ -124,25 +138,35 @@ object ChatSession {
             VoiceSession.replyStarted(speak)
             try {
                 val client = client(appContext)
-                val places = PlaceStore(appContext).places.first().map { it.name }
-                val reply = client.reply(
-                    history.takeLast(MAX_TURNS_SENT).dropWhile { !it.fromUser },
-                    ReminderTools(appContext, places),
-                ) { soFar ->
+                val toolBox = tools ?: ReminderTools(appContext).also { tools = it }
+                val alter = breakNextMessage.also { breakNextMessage = false }
+                val reply = client.reply(history.takeLast(MAX_TURNS_SENT).dropWhile { !it.fromUser }, toolBox, alter) { soFar ->
                     _ui.update { it.copy(replying = soFar) }
                     VoiceSession.replyProgress(soFar)
                 }
                 VoiceSession.replyFinished()
-                _ui.update { it.copy(turns = it.turns + ChatTurn(fromUser = false, text = reply.text, actions = reply.actions, transcript = reply.transcript)) }
+                _ui.update { state ->
+                    // If earlier thinking had to be dropped to get this reply, drop it from the
+                    // stored turns too, so the next message doesn't hit the same refusal.
+                    val earlier = if (reply.thinkingStripped) {
+                        state.turns.map { t -> t.transcript?.let { t.copy(transcript = it.withoutThinking()) } ?: t }
+                    } else {
+                        state.turns
+                    }
+                    state.copy(turns = earlier + ChatTurn(fromUser = false, text = reply.text, actions = reply.actions, transcript = reply.transcript))
+                }
                 saveToMemory(memory, MemoryMessage.ROLE_RUBY, reply.text)
             } catch (e: ClaudeChat.ChatError) {
                 SensingLog.add("Chat: ${e.message}")
                 VoiceSession.replyFailed(e.message ?: "I couldn't answer.")
                 _ui.update { it.copy(error = e.message) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                SensingLog.add("Chat failed: ${e.javaClass.simpleName}: ${e.message}")
-                VoiceSession.replyFailed("Something went wrong.")
-                _ui.update { it.copy(error = "Something went wrong: ${e.message ?: e.javaClass.simpleName}") }
+                // Never show raw errors; log them whole.
+                ClaudeChat.logError("Chat failed", e)
+                VoiceSession.replyFailed(ClaudeChat.LOST_TRAIN_OF_THOUGHT)
+                _ui.update { it.copy(error = ClaudeChat.LOST_TRAIN_OF_THOUGHT) }
             } finally {
                 _ui.update { it.copy(sending = false, replying = null) }
             }
@@ -165,6 +189,17 @@ object ChatSession {
         ReminderText.snapshot(ReminderStore(context).pending())
     } catch (e: Exception) {
         SensingLog.add("Couldn't read reminders for the chat: ${e.message}")
+        null
+    }
+
+    /**
+     * The saved places' names, read fresh for this message, e.g. "Saved places: Home, Work."
+     * They go in the message rather than the tools, so the tools never change mid-chat.
+     */
+    private suspend fun currentPlaces(context: Context): String? = try {
+        val names = PlaceStore(context).places.first().map { it.name }
+        "Saved places: " + (names.joinToString(", ").ifEmpty { "none" }) + "."
+    } catch (e: Exception) {
         null
     }
 

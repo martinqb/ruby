@@ -64,7 +64,9 @@ class ChatSummarizer(apiKey: String) {
         } catch (e: RateLimitException) {
             throw Failed("Too many requests to Anthropic; trying again another night.", stopRun = true, e)
         } catch (e: AnthropicServiceException) {
-            throw Failed("Anthropic returned an error (${e.statusCode()}): ${e.message}", stopRun = e.statusCode() >= 500, e)
+            // The raw error is JSON: log it whole, and show a plain sentence.
+            ClaudeChat.logError("Summarizing: Anthropic returned ${e.statusCode()}", e)
+            throw Failed("Anthropic returned an error (${e.statusCode()}).", stopRun = e.statusCode() >= 500, e)
         } catch (e: AnthropicIoException) {
             throw Failed("Couldn't reach Anthropic.", stopRun = true, e)
         }

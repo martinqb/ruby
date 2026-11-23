@@ -104,7 +104,7 @@ object VoiceSession {
     fun replyFailed(message: String) = onMain {
         if (chunker != null) {
             voice?.stop()
-            voice?.say("Sorry. $message")
+            voice?.say(if (message.startsWith("Sorry")) message else "Sorry. $message")
         }
         chunker = null
     }
