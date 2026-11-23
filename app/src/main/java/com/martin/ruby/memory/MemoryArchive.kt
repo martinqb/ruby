@@ -78,6 +78,13 @@ interface ArchiveDao {
     )
     fun stored(): Flow<List<ArchiveSummary>>
 
+    /** Like [stored], once, for export. */
+    @Query(
+        "SELECT id, state, firstMillis, lastMillis, messageCount, sizeBytes, heldUntilMillis " +
+            "FROM memory_archive WHERE state != 'back' ORDER BY firstMillis, id"
+    )
+    suspend fun storedNow(): List<ArchiveSummary>
+
     @Query("SELECT id FROM memory_archive WHERE state = 'phone' ORDER BY firstMillis LIMIT 1")
     suspend fun oldestOnPhone(): Long?
 

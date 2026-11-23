@@ -72,6 +72,13 @@ interface MemoryDao {
     @Query("DELETE FROM messages WHERE id IN (:ids)")
     suspend fun deleteIds(ids: List<Long>)
 
+    /** For export: the next [limit] messages after ([afterTime], [afterId]), oldest first. */
+    @Query(
+        "SELECT * FROM messages WHERE timeMillis > :afterTime OR (timeMillis = :afterTime AND id > :afterId) " +
+            "ORDER BY timeMillis, id LIMIT :limit"
+    )
+    suspend fun pageAfter(afterTime: Long, afterId: Long, limit: Int): List<MemoryMessage>
+
     /**
      * The oldest messages that may be packed away: never the newest [keepNewest], and not
      * ones the user just brought back.

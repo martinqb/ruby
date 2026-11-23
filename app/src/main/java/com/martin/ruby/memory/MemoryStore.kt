@@ -3,12 +3,15 @@ package com.martin.ruby.memory
 import android.content.Context
 import android.os.SystemClock
 import androidx.room.withTransaction
+import com.martin.ruby.data.CarSettings
+import com.martin.ruby.data.PlaceStore
 import com.martin.ruby.decision.ContextStatus
 import com.martin.ruby.drive.DriveArchiveCloud
 import com.martin.ruby.log.SensingLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flowOf
@@ -107,6 +110,34 @@ class MemoryStore(context: Context) {
         SensingLog.add("Brought back $count archived messages into memory.")
         MemoryLimit.check(appContext)
         return count
+    }
+
+    /**
+     * Writes everything in memory to [writer] (see [MemoryExporter]); the JSON format also
+     * gets the saved places and the car. Memory itself doesn't change.
+     */
+    suspend fun export(
+        writer: java.io.Writer,
+        format: MemoryExport.Format,
+        includeDrive: Boolean,
+        onProgress: (Int) -> Unit = {},
+    ): MemoryExport.Summary {
+        val json = format == MemoryExport.Format.JSON
+        val car = if (json) CarSettings(appContext).car.first()?.let { MemoryExport.Car(it.name, it.address) } else null
+        val places = if (json) PlaceStore(appContext).places.first().map { MemoryExport.Place(it.name, it.latitude, it.longitude) }
+        else emptyList()
+        val db = withContext(Dispatchers.IO) { MemoryDatabase.get(appContext) }
+        val summary = MemoryExporter(db).export(
+            writer,
+            MemoryExporter.Options(format, includeDrive, car, places),
+            cloud = { DriveArchiveCloud.connect(appContext) },
+            onProgress = onProgress,
+        )
+        SensingLog.add(
+            "Exported ${summary.total} messages as ${format.extension}" +
+                if (summary.skipped.isEmpty()) "." else "; ${summary.skipped.size} parts not included."
+        )
+        return summary
     }
 
     /** For testing the storage limit: saves [count] made-up notes of about 600 characters. */

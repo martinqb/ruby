@@ -263,6 +263,12 @@ class MemoryArchiver(private val db: MemoryDatabase, private val dbFile: File) {
         /** One at a time across the app, so a check and a bring-back never overlap. */
         private val lock = Mutex()
 
+        /**
+         * Runs [block] while nothing can pack, move or bring back memories, so it sees every
+         * message exactly once (export uses this). Don't call the archiver from inside it.
+         */
+        suspend fun <T> whileArchivesStill(block: suspend () -> T): T = lock.withLock { block() }
+
         fun archiveName(archive: MemoryArchive) =
             "${com.martin.ruby.drive.DriveBackup.ARCHIVE_PREFIX}${archive.createdMillis}-${archive.id}.rubyarchive"
 

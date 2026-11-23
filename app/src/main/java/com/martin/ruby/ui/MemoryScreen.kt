@@ -1,6 +1,8 @@
 package com.martin.ruby.ui
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -54,6 +56,7 @@ fun MemoryScreen(
     store: MemoryStore,
     onOpenBackup: () -> Unit,
     onOpenStorage: () -> Unit,
+    onOpenExport: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -86,6 +89,7 @@ fun MemoryScreen(
         onDeleteAll = { scope.launch { store.deleteAll() } },
         onOpenBackup = onOpenBackup,
         onOpenStorage = onOpenStorage,
+        onOpenExport = onOpenExport,
         onBack = onBack,
         modifier = modifier,
     )
@@ -106,6 +110,7 @@ private fun MemoryContent(
     onDeleteAll: () -> Unit,
     onOpenBackup: () -> Unit,
     onOpenStorage: () -> Unit,
+    onOpenExport: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -113,11 +118,14 @@ private fun MemoryContent(
     var confirmDeleteAll by remember { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.Top) {
             TextButton(onClick = onBack) { Text("Back") }
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = onOpenStorage) { Text("Storage") }
-            TextButton(onClick = onOpenBackup) { Text("Backup and restore") }
+            // Wraps onto a second line on narrow phones.
+            FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onOpenStorage) { Text("Storage") }
+                TextButton(onClick = onOpenExport) { Text("Export") }
+                TextButton(onClick = onOpenBackup) { Text("Backup and restore") }
+            }
         }
         Text("Memory", style = MaterialTheme.typography.headlineSmall)
         Text(
@@ -254,6 +262,7 @@ private fun MemoryScreenPreview() {
             onDeleteAll = {},
             onOpenBackup = {},
             onOpenStorage = {},
+            onOpenExport = {},
             onBack = {},
         )
     }

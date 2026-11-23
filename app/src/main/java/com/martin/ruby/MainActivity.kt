@@ -46,13 +46,14 @@ import com.martin.ruby.ui.MainScreen
 import com.martin.ruby.ui.MainUiState
 import com.martin.ruby.ui.MemoryScreen
 import com.martin.ruby.ui.PlacesScreen
+import com.martin.ruby.ui.ExportScreen
 import com.martin.ruby.ui.StorageScreen
 import com.martin.ruby.ui.theme.RubyTheme
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Which screen is showing. */
-private enum class Screen { MAIN, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE }
+private enum class Screen { MAIN, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT }
 
 class MainActivity : ComponentActivity() {
 
@@ -128,7 +129,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (screen != Screen.MAIN) BackHandler {
-                    screen = if (screen == Screen.BACKUP || screen == Screen.STORAGE) Screen.MEMORY else Screen.MAIN
+                    screen = if (screen == Screen.BACKUP || screen == Screen.STORAGE || screen == Screen.EXPORT) Screen.MEMORY else Screen.MAIN
                 }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -155,6 +156,7 @@ class MainActivity : ComponentActivity() {
                             store = memoryStore,
                             onOpenBackup = { screen = Screen.BACKUP },
                             onOpenStorage = { screen = Screen.STORAGE },
+                            onOpenExport = { screen = Screen.EXPORT },
                             onBack = { screen = Screen.MAIN },
                             modifier = modifier,
                         )
@@ -166,6 +168,12 @@ class MainActivity : ComponentActivity() {
                         )
 
                         Screen.STORAGE -> StorageScreen(
+                            store = memoryStore,
+                            onBack = { screen = Screen.MEMORY },
+                            modifier = modifier,
+                        )
+
+                        Screen.EXPORT -> ExportScreen(
                             store = memoryStore,
                             onBack = { screen = Screen.MEMORY },
                             modifier = modifier,
