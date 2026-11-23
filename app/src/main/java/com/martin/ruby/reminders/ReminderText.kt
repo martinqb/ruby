@@ -16,6 +16,26 @@ object ReminderText {
     fun time(millis: Long, zone: ZoneId = ZoneId.systemDefault()): String =
         SHOWN.format(Instant.ofEpochMilli(millis).atZone(zone))
 
+    /** Two time reminders this close together count as the same time. */
+    const val SAME_TIME_MILLIS = 2 * 60_000L
+
+    /**
+     * A waiting reminder in [pending] that's the same as a new one would be: the same text
+     * (ignoring case, spacing and a final period) and the same place, or a time within
+     * [SAME_TIME_MILLIS]. Null if there's none.
+     */
+    fun duplicateOf(pending: List<Reminder>, text: String, dueMillis: Long?, place: String?): Reminder? {
+        fun norm(s: String) = s.trim().trimEnd('.', '!').replace(Regex("\\s+"), " ").lowercase()
+        val wanted = norm(text)
+        return pending.firstOrNull { r ->
+            r.state == Reminder.STATE_PENDING && norm(r.text) == wanted && when {
+                place != null -> r.place.equals(place, ignoreCase = true)
+                dueMillis != null -> r.dueMillis != null && kotlin.math.abs(r.dueMillis - dueMillis) <= SAME_TIME_MILLIS
+                else -> false
+            }
+        }
+    }
+
     /** Either the time in millis, or why the text isn't a usable reminder time. */
     sealed interface Parsed {
         data class Ok(val millis: Long) : Parsed

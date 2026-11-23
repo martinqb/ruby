@@ -131,7 +131,7 @@ object ChatSession {
                     VoiceSession.replyProgress(soFar)
                 }
                 VoiceSession.replyFinished()
-                _ui.update { it.copy(turns = it.turns + ChatTurn(fromUser = false, text = reply.text, actions = reply.actions)) }
+                _ui.update { it.copy(turns = it.turns + ChatTurn(fromUser = false, text = reply.text, actions = reply.actions, transcript = reply.transcript)) }
                 saveToMemory(memory, MemoryMessage.ROLE_RUBY, reply.text)
             } catch (e: ClaudeChat.ChatError) {
                 SensingLog.add("Chat: ${e.message}")
