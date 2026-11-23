@@ -101,6 +101,7 @@ object NightlyBackup {
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Backups paused")
+            .setGroup("backup") // not bundled with Ruby's other notifications
             .setContentText("Google needs you to approve Drive access again. Tap to approve.")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(

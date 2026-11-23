@@ -19,6 +19,8 @@ import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
+import com.martin.ruby.reminders.Reminder
+import com.martin.ruby.reminders.ReminderDao
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 import java.io.File
 
@@ -115,17 +117,20 @@ interface MemoryDao {
  * so they're made with plain SQL when the database opens.
  */
 @Database(
-    entities = [MemoryMessage::class, MemoryArchive::class],
-    version = 2,
+    entities = [MemoryMessage::class, MemoryArchive::class, Reminder::class],
+    version = 3,
     exportSchema = true,
     // Version 2 added memory_archive. Room works out the change from the saved schemas.
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    // Version 3 added reminders.
+    autoMigrations = [AutoMigration(from = 1, to = 2), AutoMigration(from = 2, to = 3)],
 )
 abstract class MemoryDatabase : RoomDatabase() {
 
     abstract fun dao(): MemoryDao
 
     abstract fun archiveDao(): ArchiveDao
+
+    abstract fun reminderDao(): ReminderDao
 
     companion object {
         const val FILE_NAME = "memory.db"

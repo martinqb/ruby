@@ -119,7 +119,7 @@ Be upfront in the privacy policy: each message and its memory snippets still go 
 8. **Weekly reflection.** Every Sunday, Ruby summarizes the week from her memory: places visited, time driving, what you talked about, and anything still open. Run it with WorkManager and save the summary as its own memory entry.
 9. **Offline voice with Kokoro.** Add Kokoro TTS as an on-phone voice option: an open-source text-to-speech model (Kokoro-82M) that runs on the phone and works offline, with several voices to choose from. Plug it in as a new `RubyVoice` (one class plus a `VoiceEngine` entry), and add a voice picker with a short preview to the Voice settings. Download the model on first use over Wi-Fi rather than bundling it in the app, since it's tens of megabytes. A runtime such as sherpa-onnx can run it on Android. Keep Android text-to-speech as the fallback.
 
-**Status (Nov 23, 2026):** voice came early: the chat already speaks with Android text-to-speech and listens with on-device speech-to-text, behind `RubyVoice` and `RubyEars`. Kokoro (step 9) plugs into that.
+**Status (Nov 23, 2026):** voice came early: the chat already speaks with Android text-to-speech and listens with on-device speech-to-text, behind `RubyVoice` and `RubyEars`. Kokoro (step 9) plugs into that. Location reminders (step 4) are done too, along with time reminders: Ruby sets, lists and cancels them from the chat (her first tools), they fire on arriving at a saved place or at a time, and they're stored in the encrypted memory database.
 
 Permissions in this phase are sensitive (notifications, Do Not Disturb, health, accessibility). Ask for each one only when its feature is first turned on, with a one-line reason, and list them all on Ruby's privacy screen.
 

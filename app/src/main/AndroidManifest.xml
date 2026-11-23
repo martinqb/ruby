@@ -34,6 +34,9 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
+    <!-- Reminders: exact timing (Android 12+ asks the user to allow it in Settings). -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
     <!-- Voice: hearing the user when they tap Talk. Asked for the first time they do. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
@@ -85,6 +88,15 @@
             android:name=".sensing.SensingService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice|location" />
+
+        <!-- Reminders going off, their Done and Snooze buttons, and exact timing being allowed. -->
+        <receiver
+            android:name=".reminders.ReminderReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Restarts the service after the phone reboots or Ruby is updated. -->
         <receiver

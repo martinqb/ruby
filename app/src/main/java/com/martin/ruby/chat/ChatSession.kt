@@ -7,6 +7,11 @@ import com.martin.ruby.log.SensingLog
 import com.martin.ruby.memory.MemoryMessage
 import com.martin.ruby.memory.MemoryRecall
 import com.martin.ruby.memory.MemoryStore
+import com.martin.ruby.data.PlaceStore
+import com.martin.ruby.reminders.ReminderText
+import com.martin.ruby.reminders.ReminderTools
+import java.time.ZoneId
+import kotlinx.coroutines.flow.first
 import com.martin.ruby.voice.VoiceSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -105,10 +110,11 @@ object ChatSession {
             // Look before saving the new message, so it doesn't find itself.
             val memories = recall(memory, message)
             saveToMemory(memory, MemoryMessage.ROLE_USER, message)
+            val now = "${ReminderText.time(System.currentTimeMillis())} (${ZoneId.systemDefault().id})"
             val turn = ChatTurn(
                 fromUser = true,
                 text = message,
-                sent = ClaudeChat.compose(message, label, MemoryRecall.format(memories)),
+                sent = ClaudeChat.compose(message, label, now, MemoryRecall.format(memories)),
                 memoriesUsed = memories.size,
             )
             _ui.update { it.copy(turns = it.turns.dropLast(1) + turn) }
@@ -116,15 +122,17 @@ object ChatSession {
             VoiceSession.replyStarted(speak)
             try {
                 val client = client(appContext)
-                val reply = withContext(Dispatchers.IO) {
-                    client.reply(history.takeLast(MAX_TURNS_SENT).dropWhile { !it.fromUser }) { soFar ->
-                        _ui.update { it.copy(replying = soFar) }
-                        VoiceSession.replyProgress(soFar)
-                    }
+                val places = PlaceStore(appContext).places.first().map { it.name }
+                val reply = client.reply(
+                    history.takeLast(MAX_TURNS_SENT).dropWhile { !it.fromUser },
+                    ReminderTools(appContext, places),
+                ) { soFar ->
+                    _ui.update { it.copy(replying = soFar) }
+                    VoiceSession.replyProgress(soFar)
                 }
                 VoiceSession.replyFinished()
-                _ui.update { it.copy(turns = it.turns + ChatTurn(fromUser = false, text = reply)) }
-                saveToMemory(memory, MemoryMessage.ROLE_RUBY, reply)
+                _ui.update { it.copy(turns = it.turns + ChatTurn(fromUser = false, text = reply.text, actions = reply.actions)) }
+                saveToMemory(memory, MemoryMessage.ROLE_RUBY, reply.text)
             } catch (e: ClaudeChat.ChatError) {
                 SensingLog.add("Chat: ${e.message}")
                 VoiceSession.replyFailed(e.message ?: "I couldn't answer.")

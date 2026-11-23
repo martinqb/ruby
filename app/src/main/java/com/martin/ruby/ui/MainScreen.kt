@@ -70,6 +70,7 @@ data class MainActions(
     val onOpenPlaces: () -> Unit = {},
     val onOpenChat: () -> Unit = {},
     val onOpenMemory: () -> Unit = {},
+    val onOpenReminders: () -> Unit = {},
     val onTestGps: () -> Unit = {},
     val onClearLog: () -> Unit = {},
 )
@@ -123,6 +124,8 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
         }
         Spacer(Modifier.height(8.dp))
         OutlinedButton(onClick = actions.onOpenMemory) { Text("Memory") }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = actions.onOpenReminders) { Text("Reminders") }
 
         Spacer(Modifier.height(24.dp))
         HorizontalDivider()

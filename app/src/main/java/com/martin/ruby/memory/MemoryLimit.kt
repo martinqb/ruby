@@ -171,6 +171,7 @@ object MemoryLimit {
             NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(title)
+                .setGroup("memory_storage") // not bundled with Ruby's other notifications
                 .setContentText(text)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text))
                 .setContentIntent(open)

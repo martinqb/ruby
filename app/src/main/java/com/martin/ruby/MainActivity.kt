@@ -51,6 +51,8 @@ import com.martin.ruby.ui.MainScreen
 import com.martin.ruby.ui.MainUiState
 import com.martin.ruby.ui.MemoryScreen
 import com.martin.ruby.ui.PlacesScreen
+import com.martin.ruby.ui.RemindersScreen
+import com.martin.ruby.reminders.ReminderStore
 import com.martin.ruby.ui.ExportScreen
 import com.martin.ruby.ui.StorageScreen
 import com.martin.ruby.ui.theme.RubyTheme
@@ -59,7 +61,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Which screen is showing. */
-private enum class Screen { MAIN, CHAT, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT }
+private enum class Screen { MAIN, CHAT, REMINDERS, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT }
 
 class MainActivity : ComponentActivity() {
 
@@ -85,6 +87,9 @@ class MainActivity : ComponentActivity() {
     /** Set when the "memory is full" notification asks for the Storage screen. */
     private var openStorageRequested by mutableStateOf(false)
 
+    /** Set when a reminder's notification is tapped. */
+    private var openRemindersRequested by mutableStateOf(false)
+
     /** Asked the first time the user taps Talk; if they allow it, Ruby starts listening. */
     private val micLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -105,6 +110,7 @@ class MainActivity : ComponentActivity() {
         backupManager = BackupManager(applicationContext)
         openBackupRequested = intent?.getBooleanExtra(EXTRA_OPEN_BACKUP, false) == true
         openStorageRequested = intent?.getBooleanExtra(EXTRA_OPEN_STORAGE, false) == true
+        openRemindersRequested = intent?.getBooleanExtra(EXTRA_OPEN_REMINDERS, false) == true
         checkPermissions()
         ChatSession.checkKey(applicationContext)
         VoiceSession.start(applicationContext)
@@ -140,6 +146,10 @@ class MainActivity : ComponentActivity() {
                 if (openStorageRequested) {
                     openStorageRequested = false
                     screen = Screen.STORAGE
+                }
+                if (openRemindersRequested) {
+                    openRemindersRequested = false
+                    screen = Screen.REMINDERS
                 }
                 if (openBackupRequested) {
                     openBackupRequested = false
@@ -194,6 +204,12 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onBack = { screen = Screen.MAIN },
                             ),
+                            modifier = modifier,
+                        )
+
+                        Screen.REMINDERS -> RemindersScreen(
+                            store = remember { ReminderStore(applicationContext) },
+                            onBack = { screen = Screen.MAIN },
                             modifier = modifier,
                         )
 
@@ -265,6 +281,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenPlaces = { screen = Screen.PLACES },
                                 onOpenChat = { screen = Screen.CHAT },
                                 onOpenMemory = { screen = Screen.MEMORY },
+                                onOpenReminders = { screen = Screen.REMINDERS },
                                 onTestGps = { BackgroundSensing.testGps(this) },
                                 onClearLog = SensingLog::clear,
                             ),
@@ -280,6 +297,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_BACKUP, false)) openBackupRequested = true
         if (intent.getBooleanExtra(EXTRA_OPEN_STORAGE, false)) openStorageRequested = true
+        if (intent.getBooleanExtra(EXTRA_OPEN_REMINDERS, false)) openRemindersRequested = true
     }
 
     override fun onResume() {
@@ -409,5 +427,8 @@ class MainActivity : ComponentActivity() {
 
         /** Intent extra: open straight to the memory Storage screen. */
         const val EXTRA_OPEN_STORAGE = "com.martin.ruby.OPEN_STORAGE"
+
+        /** Intent extra: open straight to the Reminders screen. */
+        const val EXTRA_OPEN_REMINDERS = "com.martin.ruby.OPEN_REMINDERS"
     }
 }

@@ -297,6 +297,14 @@ private fun Bubble(turn: ChatTurn, onPlay: ((String) -> Unit)?) {
                 modifier = Modifier.padding(top = 2.dp, end = 4.dp),
             )
         }
+        turn.actions.forEach { action ->
+            Text(
+                action,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.primary,
+                modifier = Modifier.padding(top = 4.dp, start = 4.dp),
+            )
+        }
         if (!turn.fromUser && onPlay != null) {
             TextButton(onClick = { onPlay(turn.text) }) { Text("Play") }
         }

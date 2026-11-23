@@ -3,6 +3,7 @@ package com.martin.ruby.backup
 import android.content.Context
 import com.martin.ruby.log.SensingLog
 import com.martin.ruby.memory.MemoryDatabase
+import com.martin.ruby.reminders.ReminderStore
 import com.martin.ruby.memory.MemoryKey
 import com.martin.ruby.security.KeystoreBox
 import kotlinx.coroutines.Dispatchers
@@ -112,6 +113,9 @@ class BackupManager(context: Context) {
         val count = MemoryDatabase.replace(appContext, contents.database, contents.wal, contents.databaseKey)
         withContext(Dispatchers.IO) { keep(unlocked.opened.backupKey, unlocked.opened.header) }
         SensingLog.add("Memory restored from a backup: $count messages.")
+        // The backup brought its reminders along; Android needs their alarms set again.
+        runCatching { ReminderStore(appContext).rescheduleAll() }
+            .onFailure { SensingLog.add("Couldn't schedule restored reminders: ${it.message}") }
         return count
     }
 
