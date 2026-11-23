@@ -52,6 +52,8 @@ import com.martin.ruby.ui.MainUiState
 import com.martin.ruby.ui.MemoryScreen
 import com.martin.ruby.ui.PlacesScreen
 import com.martin.ruby.ui.RemindersScreen
+import com.martin.ruby.ui.SummariesScreen
+import com.martin.ruby.memory.Summaries
 import com.martin.ruby.reminders.ReminderStore
 import com.martin.ruby.ui.ExportScreen
 import com.martin.ruby.ui.StorageScreen
@@ -61,7 +63,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Which screen is showing. */
-private enum class Screen { MAIN, CHAT, REMINDERS, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT }
+private enum class Screen { MAIN, CHAT, REMINDERS, SUMMARIES, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT }
 
 class MainActivity : ComponentActivity() {
 
@@ -121,6 +123,8 @@ class MainActivity : ComponentActivity() {
             if (BackupStatusStore(applicationContext).current().nightlyOn && backupManager.isSetUp()) {
                 NightlyBackup.schedule(applicationContext)
             }
+            // The same for nightly summaries (on unless the user turned them off).
+            Summaries.ensureScheduled(applicationContext)
         }
 
         // Ask the first time the app opens (or the first time after an update adds a permission).
@@ -157,7 +161,9 @@ class MainActivity : ComponentActivity() {
                 }
 
                 if (screen != Screen.MAIN) BackHandler {
-                    screen = if (screen == Screen.BACKUP || screen == Screen.STORAGE || screen == Screen.EXPORT) Screen.MEMORY else Screen.MAIN
+                    screen = if (screen == Screen.BACKUP || screen == Screen.STORAGE || screen == Screen.EXPORT ||
+                        screen == Screen.SUMMARIES
+                    ) Screen.MEMORY else Screen.MAIN
                 }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
@@ -219,6 +225,7 @@ class MainActivity : ComponentActivity() {
                             onOpenStorage = { screen = Screen.STORAGE },
                             onOpenExport = { screen = Screen.EXPORT },
                             onBack = { screen = Screen.MAIN },
+                            onOpenSummaries = { screen = Screen.SUMMARIES },
                             modifier = modifier,
                         )
 
@@ -230,6 +237,11 @@ class MainActivity : ComponentActivity() {
 
                         Screen.STORAGE -> StorageScreen(
                             store = memoryStore,
+                            onBack = { screen = Screen.MEMORY },
+                            modifier = modifier,
+                        )
+
+                        Screen.SUMMARIES -> SummariesScreen(
                             onBack = { screen = Screen.MEMORY },
                             modifier = modifier,
                         )

@@ -67,36 +67,58 @@ class MemoryStore(context: Context) {
     suspend fun add(role: String, text: String): Long {
         val context = (ContextStatus.strongestRecent(SystemClock.elapsedRealtime())
             ?: ContextStatus.reading.value?.state)?.label
-        val id = dao().insert(
-            MemoryMessage(timeMillis = System.currentTimeMillis(), role = role, text = text, context = context)
-        )
+        val message = MemoryMessage(timeMillis = System.currentTimeMillis(), role = role, text = text, context = context)
+        val db = withContext(Dispatchers.IO) { MemoryDatabase.get(appContext) }
+        val id = db.withTransaction {
+            // A summary of this day no longer covers all of it. Delete it, so it's made again
+            // from the whole day (summaries are only made for days a week old, so normally
+            // there's none; but a debug run can summarize today).
+            db.summaryDao().deleteDay(Summaries.dayOf(message))
+            db.dao().insert(message)
+        }
         MemoryLimit.check(appContext)
         return id
     }
 
     /**
-     * The few past messages most related to [message], for sending along to Claude, leaving
-     * out [exclude] (the current conversation, which is sent in full anyway). Empty if
-     * nothing matches. Archived messages aren't searched.
+     * The few past messages and day summaries most related to [message], for sending along
+     * to Claude (see [MemoryRecall.choose]), leaving out [exclude] (the current conversation,
+     * which is sent in full anyway). Empty if nothing matches. Archived messages aren't
+     * searched, but their days' summaries are.
      */
-    suspend fun recall(message: String, exclude: Set<Long>): List<MemoryMessage> {
+    suspend fun recall(message: String, exclude: Set<Long>): List<MemoryRecall.Recalled> {
         val fts = MemoryRecall.ftsQuery(message) ?: return emptyList()
-        return dao().searchNow(MemoryDatabase.recallQuery(fts, MemoryRecall.MAX_MEMORIES + exclude.size))
+        val db = withContext(Dispatchers.IO) { MemoryDatabase.get(appContext) }
+        // A few extra, since some may be replaced by their day's summary.
+        val messages = db.dao().searchNow(MemoryDatabase.recallQuery(fts, MemoryRecall.MAX_MEMORIES * 2 + exclude.size))
             .filter { it.id !in exclude }
-            .take(MemoryRecall.MAX_MEMORIES)
+        val matched = db.summaryDao().searchNow(MemoryDatabase.summarySearchQuery(fts, MemoryRecall.MAX_MEMORIES))
+        val byDay = db.summaryDao().forDays(messages.map { Summaries.dayOf(it) }.distinct()).associateBy { it.day }
+        return MemoryRecall.choose(messages, { byDay[Summaries.dayOf(it)] }, matched)
     }
 
-    suspend fun delete(message: MemoryMessage) = dao().delete(message.id)
+    /**
+     * Deletes a message, and its day's summary, which may mention it. If the day is old
+     * enough, the summary is made again (without it) on the next run.
+     */
+    suspend fun delete(message: MemoryMessage) {
+        val db = withContext(Dispatchers.IO) { MemoryDatabase.get(appContext) }
+        db.withTransaction {
+            db.dao().delete(message.id)
+            db.summaryDao().deleteDay(Summaries.dayOf(message))
+        }
+    }
 
     /**
-     * Deletes every message on the phone, and the compressed bundles kept on the phone.
-     * Memories moved to Google Drive stay there.
+     * Deletes every message on the phone, the compressed bundles kept on the phone, and the
+     * day summaries made from them. Memories moved to Google Drive stay there.
      */
     suspend fun deleteAll() = withContext(Dispatchers.IO) {
         val db = MemoryDatabase.get(appContext)
         db.withTransaction {
             db.dao().deleteAll()
             db.archiveDao().deleteAllOnPhone()
+            db.summaryDao().deleteAll()
         }
         MemoryLimit.check(appContext)
     }

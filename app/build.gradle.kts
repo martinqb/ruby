@@ -45,6 +45,9 @@ ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
 }
 
+// Device tests read the saved schemas, to build an old version of the memory database and upgrade it.
+android.sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
