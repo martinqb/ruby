@@ -8,6 +8,7 @@ import com.martin.ruby.memory.MemoryMessage
 import com.martin.ruby.memory.MemoryRecall
 import com.martin.ruby.memory.MemoryStore
 import com.martin.ruby.data.PlaceStore
+import com.martin.ruby.reminders.ReminderStore
 import com.martin.ruby.reminders.ReminderText
 import com.martin.ruby.reminders.ReminderTools
 import java.time.ZoneId
@@ -114,7 +115,8 @@ object ChatSession {
             val turn = ChatTurn(
                 fromUser = true,
                 text = message,
-                sent = ClaudeChat.compose(message, label, now, MemoryRecall.format(memories)),
+                // The reminders as they are right now, so Ruby never goes by stale tool results.
+                sent = ClaudeChat.compose(message, label, now, currentReminders(appContext), MemoryRecall.format(memories)),
                 memoriesUsed = memories.size,
             )
             _ui.update { it.copy(turns = it.turns.dropLast(1) + turn) }
@@ -131,7 +133,7 @@ object ChatSession {
                     VoiceSession.replyProgress(soFar)
                 }
                 VoiceSession.replyFinished()
-                _ui.update { it.copy(turns = it.turns + ChatTurn(fromUser = false, text = reply.text, actions = reply.actions)) }
+                _ui.update { it.copy(turns = it.turns + ChatTurn(fromUser = false, text = reply.text, actions = reply.actions, transcript = reply.transcript)) }
                 saveToMemory(memory, MemoryMessage.ROLE_RUBY, reply.text)
             } catch (e: ClaudeChat.ChatError) {
                 SensingLog.add("Chat: ${e.message}")
@@ -154,6 +156,17 @@ object ChatSession {
      */
     private fun currentContextLabel(): String? =
         (ContextStatus.strongestRecent(SystemClock.elapsedRealtime()) ?: ContextStatus.reading.value?.state)?.label
+
+    /**
+     * The waiting reminders, read fresh for this message. Null (no note) if memory can't be
+     * opened; Ruby's instructions then fall back to calling list_reminders.
+     */
+    private suspend fun currentReminders(context: Context): String? = try {
+        ReminderText.snapshot(ReminderStore(context).pending())
+    } catch (e: Exception) {
+        SensingLog.add("Couldn't read reminders for the chat: ${e.message}")
+        null
+    }
 
     /** Related past messages, or none if memory can't be searched (the chat still works). */
     private suspend fun recall(memory: MemoryStore, message: String): List<MemoryMessage> = try {

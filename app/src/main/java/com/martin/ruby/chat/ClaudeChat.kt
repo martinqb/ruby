@@ -16,6 +16,7 @@ import com.anthropic.models.beta.messages.BetaMessage
 import com.anthropic.models.beta.messages.BetaMessageParam
 import com.anthropic.models.beta.messages.BetaOutputConfig
 import com.anthropic.models.beta.messages.BetaStopReason
+import com.anthropic.models.beta.messages.BetaToolChoiceNone
 import com.anthropic.models.beta.messages.BetaToolResultBlockParam
 import com.anthropic.models.beta.messages.BetaToolUseBlock
 import com.anthropic.models.beta.messages.MessageCreateParams
@@ -36,6 +37,20 @@ data class ChatTurn(
     val memoriesUsed: Int = 0,
     /** What Ruby did with tools during this reply, e.g. "Reminder set: Call Mom, ...". */
     val actions: List<String> = emptyList(),
+    /**
+     * For Ruby's turns: everything Claude sent and got back in this reply, tool calls and
+     * results included. Later requests send this instead of just [text], so Claude sees its
+     * own earlier actions (without it, it saw "reminder set" with nothing behind it and set
+     * the reminder again).
+     */
+    val transcript: ReplyTranscript? = null,
+)
+
+/** One reply's messages as they went to and from the API, to send again unchanged. */
+class ReplyTranscript internal constructor(
+    internal val rounds: List<Pair<BetaMessage, List<BetaContentBlockParam>>>,
+    /** Claude's last message in the reply, or null if it had nothing to send again. */
+    internal val final: BetaMessage?,
 )
 
 /**
@@ -48,8 +63,8 @@ class ClaudeChat(apiKey: String) {
     /** Something went wrong; [message] is written for the user. */
     class ChatError(message: String, cause: Throwable? = null) : Exception(message, cause)
 
-    /** Claude's answer, and what it did with tools on the way. */
-    data class Reply(val text: String, val actions: List<String>)
+    /** Claude's answer, what it did with tools on the way, and the whole exchange for later turns. */
+    data class Reply(val text: String, val actions: List<String>, val transcript: ReplyTranscript)
 
     private val client: AnthropicClient = AnthropicOkHttpClient.builder().apiKey(apiKey).build()
 
@@ -79,10 +94,23 @@ class ClaudeChat(apiKey: String) {
                 .addBeta(AnthropicBeta.SERVER_SIDE_FALLBACK_2026_07_01)
                 .fallbacksDefault()
                 .apply {
-                    // The last round offers no tools, so Claude has to answer.
-                    if (round < MAX_TOOL_ROUNDS) toolBox?.tools?.forEach { addTool(it) }
+                    // Tools are always listed (earlier turns' tool calls need them), but the last
+                    // round doesn't allow calling them, so Claude has to answer.
+                    toolBox?.tools?.forEach { addTool(it) }
+                    if (toolBox != null && round == MAX_TOOL_ROUNDS) toolChoice(BetaToolChoiceNone.builder().build())
                     history.forEach { turn ->
-                        if (turn.fromUser) addUserMessage(turn.sent ?: turn.text) else addAssistantMessage(turn.text)
+                        val transcript = turn.transcript
+                        when {
+                            turn.fromUser -> addUserMessage(turn.sent ?: turn.text)
+                            transcript != null && toolBox != null -> {
+                                transcript.rounds.forEach { (message, results) ->
+                                    addMessage(message)
+                                    addMessage(BetaMessageParam.ofUserOfContentBlockParams(results))
+                                }
+                                transcript.final?.let { addMessage(it) }
+                            }
+                            else -> addAssistantMessage(turn.text)
+                        }
                     }
                     rounds.forEach { (message, results) ->
                         addMessage(message)
@@ -110,14 +138,21 @@ class ClaudeChat(apiKey: String) {
                 continue
             }
 
+            // Sent again in later turns. Only if it has text: a message of nothing but thinking
+            // (or a cut-off tool call) isn't worth replaying.
+            val final = message.toBuilder().content(echoable(message).filterNot { it.isToolUse() }).build()
+                .takeIf { m -> m.content().any { it.text().isPresent } }
+            val transcript = ReplyTranscript(rounds.toList(), final)
             val all = join(if (text.isEmpty()) shown else shown + text)
             if (all.isEmpty()) {
-                if (actions.isNotEmpty()) return Reply(actions.joinToString("\n"), actions)
+                if (actions.isNotEmpty()) return Reply(actions.joinToString("\n"), actions, transcript)
                 throw ChatError("Claude sent back an empty reply. Try again.")
             }
             // A tool call cut off by the length limit is never run; it just ends the reply.
-            if (stopReason == BetaStopReason.MAX_TOKENS) return Reply("$all\n\n(The reply was too long and got cut off.)", actions)
-            return Reply(all, actions)
+            if (stopReason == BetaStopReason.MAX_TOKENS) {
+                return Reply("$all\n\n(The reply was too long and got cut off.)", actions, transcript)
+            }
+            return Reply(all, actions, transcript)
         }
         throw ChatError("Ruby got stuck using her tools. Try asking again.")
     }
@@ -209,7 +244,14 @@ class ClaudeChat(apiKey: String) {
                 "to be reminded of something. Work out times from the current time in their message; if a " +
                 "time is unclear (\"later\", \"tonight\"), pick a sensible one and say which, or ask if it " +
                 "matters. After setting one, confirm it briefly in plain words. Only say a reminder is set " +
-                "once the tool says so. Reminders don't repeat yet.\n\n" +
+                "once the tool says so. Tool calls and results earlier in this conversation really happened: " +
+                "don't set a reminder again because you're unsure whether it went through. But they can be " +
+                "out of date: since then a reminder may have gone off, been snoozed, or been cancelled, here " +
+                "or on the phone's Reminders screen. Each of the user's messages carries a note, \"Waiting " +
+                "reminders: ...\", read from the phone just before it was sent. That note on the newest message " +
+                "is the truth. Before saying anything about whether a reminder is set, when it is, or that it's " +
+                "coming up, check that note (or call list_reminders); never go by earlier messages. If a " +
+                "reminder isn't in the note, it isn't waiting. Reminders don't repeat yet.\n\n" +
                 "Apart from reminders, Ruby can only talk for now: she can't set alarms or timers, send " +
                 "messages, make calls, open apps, change phone settings, or do anything else outside this " +
                 "chat. Don't offer to do those things or say you've done them. If the user asks for one, say " +
@@ -219,16 +261,20 @@ class ClaudeChat(apiKey: String) {
                 "Answer in plain text; the chat screen doesn't show Markdown."
 
         /**
-         * What's sent for a user message: the context label and time, then any memories,
-         * then what they typed, e.g. "[Right now: Driving · Mon, Nov 23, 2026, 3:42 PM (America/New_York)]".
+         * What's sent for a user message: the context label and time, the reminders waiting
+         * right now (from [com.martin.ruby.reminders.ReminderText.snapshot], or null if they
+         * couldn't be read), then any memories, then what they typed, e.g.
+         * "[Right now: Driving · Mon, Nov 23, 2026, 3:42 PM (America/New_York)]".
          */
-        fun compose(text: String, context: String?, now: String, memories: String?): String = buildString {
-            append("[Right now: ")
-            if (context != null) append("$context · ")
-            append("$now]\n")
-            if (memories != null) append("[$memories]\n\n")
-            append(text)
-        }
+        fun compose(text: String, context: String?, now: String, reminders: String?, memories: String?): String =
+            buildString {
+                append("[Right now: ")
+                if (context != null) append("$context · ")
+                append("$now]\n")
+                if (reminders != null) append("[$reminders]\n")
+                if (memories != null) append("[$memories]\n\n")
+                append(text)
+            }
 
         private fun join(parts: List<String>): String = parts.filter { it.isNotEmpty() }.joinToString("\n\n")
 

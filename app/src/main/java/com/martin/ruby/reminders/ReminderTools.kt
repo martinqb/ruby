@@ -77,6 +77,7 @@ class ReminderTools(context: Context, private val savedPlaces: List<String>) : T
                         (savedPlaces.joinToString(", ").ifEmpty { "none yet (the user can add them on the Places screen)" }) + ".",
                     isError = true,
                 )
+            alreadySet(text, dueMillis = null, place = place)?.let { return it }
             val r = store.add(text, dueMillis = null, place = place)
             return ToolOutcome(
                 "Reminder ${r.id} set for the next time they arrive at $place: $text.",
@@ -87,6 +88,7 @@ class ReminderTools(context: Context, private val savedPlaces: List<String>) : T
         return when (val parsed = ReminderText.parse(at!!, System.currentTimeMillis())) {
             is ReminderText.Parsed.Bad -> ToolOutcome(parsed.why, isError = true)
             is ReminderText.Parsed.Ok -> {
+                alreadySet(text, dueMillis = parsed.millis, place = null)?.let { return it }
                 val r = store.add(text, dueMillis = parsed.millis, place = null)
                 val time = ReminderText.time(parsed.millis)
                 ToolOutcome(
@@ -97,6 +99,18 @@ class ReminderTools(context: Context, private val savedPlaces: List<String>) : T
                 )
             }
         }
+    }
+
+    /**
+     * If the same reminder is already waiting, says so instead of making a second one. Not an
+     * error: the user's reminder exists, which is what they asked for.
+     */
+    private suspend fun alreadySet(text: String, dueMillis: Long?, place: String?): ToolOutcome? {
+        val existing = ReminderText.duplicateOf(store.pending(), text, dueMillis, place) ?: return null
+        val whenText = existing.place?.let { "for the next time they arrive at $it" }
+            ?: "for ${ReminderText.time(existing.dueMillis!!)}"
+        SensingLog.add("Reminder ${existing.id} was already set; didn't make a duplicate.")
+        return ToolOutcome("Reminder ${existing.id} is already set $whenText: ${existing.text}. No duplicate was made.")
     }
 
     private suspend fun list(): ToolOutcome {
