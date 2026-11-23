@@ -119,6 +119,9 @@ Be upfront in the privacy policy: each message and its memory snippets still go 
 6. **Health and sleep insights.** Read steps, sleep and heart rate from Health Connect (each data type needs its own permission). Ruby looks for patterns, for example worse sleep after late nights, and mentions them in the weekly reflection. Keep health data on the phone like the chat archive.
 7. **Acting inside apps.** Go beyond opening apps: send a text, start navigation to a saved place, play a playlist. Start with Android intents (an SMS intent, a `google.navigation:` intent, a media search intent). Watch for newer Android features that let apps expose actions to AI agents, and add them as they become available.
 8. **Weekly reflection.** Every Sunday, Ruby summarizes the week from her memory: places visited, time driving, what you talked about, and anything still open. Run it with WorkManager and save the summary as its own memory entry.
+9. **Offline voice with Kokoro.** Add Kokoro TTS as an on-phone voice option: an open-source text-to-speech model (Kokoro-82M) that runs on the phone and works offline, with several voices to choose from. Plug it in as a new `RubyVoice` (one class plus a `VoiceEngine` entry), and add a voice picker with a short preview to the Voice settings. Download the model on first use over Wi-Fi rather than bundling it in the app, since it's tens of megabytes. A runtime such as sherpa-onnx can run it on Android. Keep Android text-to-speech as the fallback.
+
+**Status (Nov 23, 2026):** voice came early: the chat already speaks with Android text-to-speech and listens with on-device speech-to-text, behind `RubyVoice` and `RubyEars`. Kokoro (step 9) plugs into that.
 
 Permissions in this phase are sensitive (notifications, Do Not Disturb, health, accessibility). Ask for each one only when its feature is first turned on, with a one-line reason, and list them all on Ruby's privacy screen.
 
