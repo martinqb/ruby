@@ -60,6 +60,8 @@ import com.martin.ruby.backup.BackupStatus
 import com.martin.ruby.backup.BackupStatusStore
 import com.martin.ruby.backup.BackupHistory
 import com.martin.ruby.backup.BackupRecord
+import com.martin.ruby.backup.RestoreSession
+import com.martin.ruby.backup.backupFailureText
 import kotlinx.coroutines.CancellationException
 import com.martin.ruby.backup.NightlyBackup
 import com.martin.ruby.backup.backupFileName
@@ -104,7 +106,13 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
     var restoreFile by remember { mutableStateOf<ChosenFile?>(null) }
     var unlocked by remember { mutableStateOf<BackupManager.Unlocked?>(null) }
 
-    LaunchedEffect(manager) { setUp = manager.isSetUp() }
+    val restoreState by RestoreSession.state.collectAsState()
+
+    // A finished restore also adopts the backup's passphrase, so check the setup again.
+    LaunchedEffect(manager, restoreState) {
+        setUp = manager.isSetUp()
+        if (restoreState is RestoreSession.State.Done) changing = false
+    }
 
     /** Runs [block], showing [what] meanwhile. If it fails, the reason is shown and passed to [onFail]. */
     fun run(what: String, onFail: (suspend (String) -> Unit)? = null, block: suspend () -> Unit) {
@@ -116,7 +124,7 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                val why = failureText(e)
+                val why = backupFailureText(e)
                 message = why
                 onFail?.invoke(why)
             } finally {
@@ -307,6 +315,7 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        RestoreResult(restoreState, onDismiss = RestoreSession::dismiss)
         Spacer(Modifier.height(8.dp))
         Row {
             OutlinedButton(
@@ -359,14 +368,32 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
         }
         unlocked?.let { backup ->
             Spacer(Modifier.height(12.dp))
-            Text(
-                "Unlocked: a backup from ${DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(backup.createdMillis))} " +
-                    "with ${backup.messageCount} messages.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            // Unlocking only opens the backup; say plainly that nothing has changed yet.
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(
+                        "Unlocked, not restored yet",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                    Text(
+                        "A backup from ${DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(backup.createdMillis))} " +
+                            "with ${backup.messageCount} messages. Your memory on this phone hasn't changed. " +
+                            "To use this backup, tap Restore this backup.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
+                }
+            }
             Spacer(Modifier.height(8.dp))
             var confirm by remember { mutableStateOf(false) }
-            Button(onClick = { confirm = true }, enabled = busy == null) { Text("Restore this backup") }
+            Button(onClick = { confirm = true }, enabled = busy == null && restoreState !is RestoreSession.State.Running) {
+                Text("Restore this backup")
+            }
             if (confirm) {
                 AlertDialog(
                     onDismissRequest = { confirm = false },
@@ -381,13 +408,11 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
                     confirmButton = {
                         TextButton(onClick = {
                             confirm = false
-                            run("Restoring…") {
-                                val count = manager.restore(backup)
+                            // Runs for the whole app, so leaving this screen doesn't stop it.
+                            if (RestoreSession.start(context, backup)) {
                                 restoreFile = null
                                 unlocked = null
-                                setUp = true
-                                changing = false
-                                message = "Restored $count messages."
+                                message = null
                             }
                         }) { Text("Replace memory", color = MaterialTheme.colorScheme.error) }
                     },
@@ -447,11 +472,40 @@ private fun HistorySection(records: List<BackupRecord>) {
     }
 }
 
-/** The message shown (and kept in the history) when a backup action fails. */
-private fun failureText(e: Exception): String = when (e) {
-    is BackupCrypto.CantOpen, is DriveAuth.Failed, is DriveClient.Error -> e.message ?: e.javaClass.simpleName
-    is java.io.IOException -> "Couldn't reach Google Drive: ${e.message ?: "check the internet connection"}."
-    else -> "Something went wrong: ${e.message ?: e.javaClass.simpleName}"
+/** A restore in progress, or how the last one ended. Stays until dismissed, even after leaving the screen. */
+@Composable
+private fun RestoreResult(state: RestoreSession.State, onDismiss: () -> Unit) {
+    val (title, text, isError) = when (state) {
+        RestoreSession.State.Idle -> return
+        is RestoreSession.State.Running -> Triple(
+            "Restoring…",
+            "Replacing memory with the backup's ${state.messageCount} messages. This keeps going if you leave this screen.",
+            false,
+        )
+        is RestoreSession.State.Done -> Triple(
+            "Restored ${state.count} messages",
+            "Memory on this phone now holds the backup (restored at " +
+                DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(state.finishedMillis)) + ").",
+            false,
+        )
+        is RestoreSession.State.Failed -> Triple("Restore didn't finish", state.why, true)
+    }
+    Spacer(Modifier.height(12.dp))
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (isError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            val color = if (isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = color)
+            Text(text, style = MaterialTheme.typography.bodyMedium, color = color)
+            if (state !is RestoreSession.State.Running) {
+                TextButton(onClick = onDismiss) { Text("OK") }
+            }
+        }
+    }
 }
 
 /** "Google needs you to approve again": why backups stopped, and the button that fixes it. */

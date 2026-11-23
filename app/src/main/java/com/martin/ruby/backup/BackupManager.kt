@@ -7,6 +7,7 @@ import com.martin.ruby.reminders.ReminderStore
 import com.martin.ruby.memory.MemoryKey
 import com.martin.ruby.security.KeystoreBox
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
@@ -107,16 +108,21 @@ class BackupManager(context: Context) {
     /**
      * Replaces memory on this phone with an unlocked backup. From then on, backups use
      * that backup's passphrase and recovery key. Returns the number of messages restored.
+     *
+     * It can't be cancelled once started: stopping between replacing memory and keeping the
+     * backup's key would leave memory restored but later backups using the wrong key. Use
+     * [RestoreSession] to run it, so leaving the screen doesn't matter either.
      */
-    suspend fun restore(unlocked: Unlocked): Int {
+    suspend fun restore(unlocked: Unlocked): Int = withContext(NonCancellable) {
         val contents = unlocked.contents
+        SensingLog.add("Restoring memory from a backup with ${unlocked.messageCount} messages…")
         val count = MemoryDatabase.replace(appContext, contents.database, contents.wal, contents.databaseKey)
         withContext(Dispatchers.IO) { keep(unlocked.opened.backupKey, unlocked.opened.header) }
         SensingLog.add("Memory restored from a backup: $count messages.")
         // The backup brought its reminders along; Android needs their alarms set again.
         runCatching { ReminderStore(appContext).rescheduleAll() }
             .onFailure { SensingLog.add("Couldn't schedule restored reminders: ${it.message}") }
-        return count
+        count
     }
 
     private fun keep(backupKey: ByteArray, header: ByteArray) {
