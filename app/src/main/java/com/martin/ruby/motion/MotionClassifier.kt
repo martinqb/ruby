@@ -30,7 +30,8 @@ data class MotionReading(
     val paused: Boolean = false,
     /**
      * This window's result before smoothing. [motion] waits 15 s before saying
-     * "Possibly in a vehicle"; GPS uses this instead, so it can start straight away.
+     * "Possibly in a vehicle" and keeps saying Walking for 10 s after walking stops;
+     * GPS uses this instead, so it can start (and judge walking) straight away.
      */
     val raw: Motion = motion,
 )
@@ -169,27 +170,46 @@ object MotionClassifier {
 }
 
 /**
- * Makes the result steadier between windows. Walking shows up straight away, but
- * "Possibly in a vehicle" has to hold for [VEHICLE_WINDOWS_NEEDED] windows in a row,
- * so a few smooth seconds (standing in a queue, a short ride in an elevator) don't count.
+ * Makes the result steadier between windows.
+ *  - Walking shows up straight away, and is sticky: after walking, the next
+ *    [WALKING_GRACE_WINDOWS] windows still say Walking whatever they look like, so taking
+ *    the phone out of your pocket mid-stride doesn't flip it to "Moving".
+ *  - "Possibly in a vehicle" has to hold for [VEHICLE_WINDOWS_NEEDED] windows in a row,
+ *    so a few smooth seconds (standing in a queue, a short ride in an elevator) don't count.
+ *    Its count keeps going during the walking grace, so it isn't delayed any further.
  */
 class MotionSmoother {
     private var vehicleWindows = 0
+    private var walkingGraceLeft = 0
 
     fun smooth(raw: Motion): Motion {
-        if (raw != Motion.IN_VEHICLE) {
+        if (raw == Motion.WALKING) {
             vehicleWindows = 0
-            return raw
+            walkingGraceLeft = WALKING_GRACE_WINDOWS
+            return Motion.WALKING
         }
-        vehicleWindows++
-        return if (vehicleWindows >= VEHICLE_WINDOWS_NEEDED) Motion.IN_VEHICLE else Motion.UNKNOWN
+        val result = if (raw == Motion.IN_VEHICLE) {
+            vehicleWindows++
+            if (vehicleWindows >= VEHICLE_WINDOWS_NEEDED) Motion.IN_VEHICLE else Motion.UNKNOWN
+        } else {
+            vehicleWindows = 0
+            raw
+        }
+        if (walkingGraceLeft > 0 && result != Motion.IN_VEHICLE) {
+            walkingGraceLeft--
+            return Motion.WALKING
+        }
+        walkingGraceLeft = 0
+        return result
     }
 
     fun reset() {
         vehicleWindows = 0
+        walkingGraceLeft = 0
     }
 
     companion object {
         const val VEHICLE_WINDOWS_NEEDED = 3 // 3 x 5 s = 15 seconds
+        const val WALKING_GRACE_WINDOWS = 2  // 2 x 5 s = Walking sticks for about 10 seconds
     }
 }

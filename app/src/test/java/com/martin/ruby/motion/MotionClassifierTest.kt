@@ -172,6 +172,28 @@ class MotionClassifierTest {
         smoother.smooth(Motion.IN_VEHICLE)
         smoother.smooth(Motion.IN_VEHICLE)
         assertEquals(Motion.WALKING, smoother.smooth(Motion.WALKING))
-        assertEquals(Motion.UNKNOWN, smoother.smooth(Motion.IN_VEHICLE))
+        assertEquals(Motion.WALKING, smoother.smooth(Motion.IN_VEHICLE)) // walking grace
+        assertEquals(Motion.WALKING, smoother.smooth(Motion.IN_VEHICLE))
+        assertEquals(Motion.IN_VEHICLE, smoother.smooth(Motion.IN_VEHICLE)) // 3 in a row since walking
+    }
+
+    @Test
+    fun smoother_walkingSticksForTwoWindows() {
+        val smoother = MotionSmoother()
+        smoother.smooth(Motion.WALKING)
+        assertEquals(Motion.WALKING, smoother.smooth(Motion.UNKNOWN)) // phone out of the pocket
+        assertEquals(Motion.WALKING, smoother.smooth(Motion.UNKNOWN))
+        assertEquals(Motion.UNKNOWN, smoother.smooth(Motion.UNKNOWN)) // 15 s later: really moving
+    }
+
+    @Test
+    fun smoother_walkingAgain_restartsTheGrace() {
+        val smoother = MotionSmoother()
+        smoother.smooth(Motion.WALKING)
+        smoother.smooth(Motion.STILL)
+        smoother.smooth(Motion.WALKING)
+        assertEquals(Motion.WALKING, smoother.smooth(Motion.STILL))
+        assertEquals(Motion.WALKING, smoother.smooth(Motion.STILL))
+        assertEquals(Motion.STILL, smoother.smooth(Motion.STILL))
     }
 }

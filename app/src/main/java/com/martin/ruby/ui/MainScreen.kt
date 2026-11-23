@@ -68,6 +68,9 @@ data class MainActions(
     val onAllowLocation: () -> Unit = {},
     val onAllowLocationAllTheTime: () -> Unit = {},
     val onOpenPlaces: () -> Unit = {},
+    val onOpenChat: () -> Unit = {},
+    val onOpenMemory: () -> Unit = {},
+    val onOpenReminders: () -> Unit = {},
     val onTestGps: () -> Unit = {},
     val onClearLog: () -> Unit = {},
 )
@@ -96,6 +99,9 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
             Spacer(Modifier.height(16.dp))
             LocationInfo(state)
         }
+        Spacer(Modifier.height(24.dp))
+        // Chat needs no sensing permissions, so it's offered before them.
+        Button(onClick = actions.onOpenChat) { Text("Chat with Ruby") }
         Spacer(Modifier.height(32.dp))
 
         if (!state.hasBluetoothPermission) {
@@ -116,6 +122,10 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
                 Text(if (state.savedPlaceCount == 0) "Save places (home, work...)" else "Saved places (${state.savedPlaceCount})")
             }
         }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = actions.onOpenMemory) { Text("Memory") }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = actions.onOpenReminders) { Text("Reminders") }
 
         Spacer(Modifier.height(24.dp))
         HorizontalDivider()
@@ -289,7 +299,8 @@ private fun LocationInfo(state: MainUiState) {
     Details(
         when {
             location.inVehicle || location.gpsOn ->
-                "Over 15 mph for 10 seconds confirms a vehicle. Off after 2 minutes without movement."
+                "Over 15 mph for 10 seconds confirms a vehicle. Ends after 2 minutes under 3 mph or " +
+                    "without a GPS fix, or when the car disconnects and you're still or walking."
             else -> "Turns on when motion looks like a vehicle or the car's Bluetooth connects."
         }
     )

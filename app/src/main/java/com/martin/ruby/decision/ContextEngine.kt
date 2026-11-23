@@ -6,6 +6,7 @@ import com.martin.ruby.data.CarSettings
 import com.martin.ruby.location.LocationStatus
 import com.martin.ruby.log.SensingLog
 import com.martin.ruby.motion.MotionStatus
+import com.martin.ruby.reminders.ReminderStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -70,6 +71,7 @@ class ContextEngine(private val context: Context, private val scope: CoroutineSc
     private fun onInputs(inputs: ContextInputs) {
         val now = SystemClock.elapsedRealtime()
         val decision = ContextRules.decide(inputs)
+        ContextStatus.record(decision.state, now)
         val previous = smoother.current
 
         // Only real changes are logged. A pending state isn't: motion can flicker every
@@ -81,6 +83,14 @@ class ContextEngine(private val context: Context, private val scope: CoroutineSc
                 " Was ${previous.label} for ${formatDuration(wall - sinceMillis)}."
             SensingLog.add("Now ${changed.label} (${decision.reason}).$held")
             sinceMillis = wall
+            // Arriving at a saved place sets off its reminders.
+            if (changed.kind == ContextState.Kind.AT_PLACE && changed.place != null) {
+                val place = changed.place
+                scope.launch {
+                    runCatching { ReminderStore(context).arrivedAt(place) }
+                        .onFailure { SensingLog.add("Couldn't check reminders for $place: ${it.message}") }
+                }
+            }
         }
         // Keep the reason current, e.g. "motion: still" becoming "sensors paused".
         if (decision.state == smoother.current) reason = decision.reason

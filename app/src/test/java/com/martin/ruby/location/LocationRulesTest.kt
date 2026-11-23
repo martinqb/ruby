@@ -67,6 +67,66 @@ class LocationRulesTest {
         assertFalse(confirmer.add(mph(30f), 10_000L))
     }
 
+    // StopDetector: ending "In a vehicle" after parking
+
+    @Test
+    fun stop_2MinutesUnder3Mph_isStopped() {
+        val stop = StopDetector()
+        for (second in 0 until 120) assertFalse(stop.add(0.5f, 8f, second * 1000L))
+        assertTrue(stop.add(0f, 8f, 120_000L))
+    }
+
+    @Test
+    fun stop_shortDriftBursts_areIgnored() {
+        val stop = StopDetector()
+        stop.add(0f, 8f, 0L)
+        // Parked indoors: GPS makes up 4 mph for 3 seconds now and then.
+        for (t in 30_000L..32_000L step 1_000L) assertFalse(stop.add(4f, 10f, t))
+        stop.add(1f, 10f, 33_000L)
+        for (t in 80_000L..83_000L step 1_000L) stop.add(6f, 12f, t)
+        stop.add(0f, 10f, 84_000L)
+        assertTrue(stop.add(0f, 10f, 120_000L))
+    }
+
+    @Test
+    fun stop_inaccurateSpeeds_areIgnored() {
+        val stop = StopDetector()
+        stop.add(0f, 8f, 0L)
+        // ±60 m: drift, however long it lasts.
+        for (second in 10..100) assertFalse(stop.add(7f, 60f, second * 1000L))
+        assertTrue(stop.add(7f, 60f, 120_000L))
+    }
+
+    @Test
+    fun stop_drivingOffAgain_resetsTheTimer() {
+        val stop = StopDetector()
+        stop.add(0f, 8f, 0L)                                     // long red light
+        for (t in 60_000L..65_000L step 1_000L) stop.add(20f, 5f, t) // 5 s at 20 mph, accurate
+        stop.add(0f, 8f, 70_000L)                                // stopped again: new timer
+        assertFalse(stop.add(0f, 8f, 120_000L))
+        assertTrue(stop.add(0f, 8f, 190_000L))
+    }
+
+    @Test
+    fun stop_fixesWithNoSpeed_countAsStopped() {
+        val stop = StopDetector()
+        stop.add(null, null, 0L)
+        assertTrue(stop.add(null, null, 120_000L))
+    }
+
+    @Test
+    fun stop_logsStartResetAndDrift() {
+        val lines = mutableListOf<String>()
+        val stop = StopDetector(log = { lines += it })
+        stop.add(0f, 8f, 0L)
+        stop.add(4f, 8f, 1_000L)
+        stop.add(0f, 8f, 2_000L)
+        for (t in 3_000L..8_000L step 1_000L) stop.add(20f, 5f, t)
+        assertTrue(lines[0].contains("off-timer started"))
+        assertTrue(lines[1].contains("GPS drift"))
+        assertTrue(lines[2].contains("off-timer reset"))
+    }
+
     // PlaceMatcher
 
     private val home = Place("Home", 51.5007, -0.1246)

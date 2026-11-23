@@ -187,6 +187,8 @@ class SensingService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Context sensing on")
+            // Its own group, so Android doesn't bundle Ruby's other notifications with it.
+            .setGroup("sensing")
             .setContentText(status)
             .setContentIntent(openApp)
             .setOngoing(true)

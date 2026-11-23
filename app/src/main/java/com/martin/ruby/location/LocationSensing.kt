@@ -30,13 +30,18 @@ import java.util.Date
  * While on, it reads the speed every second. 10 seconds over 15 mph means "In a vehicle"
  * (dips under 15 mph of up to 3 seconds are tolerated, see [SpeedConfirmer]).
  *
- * "In a vehicle" is sticky. A single footstep-like bump doesn't end it; it only ends when:
- *  - there's been no movement for 2 minutes (or the phone is still and the sensors pause), or
+ * "In a vehicle" is sticky. A single footstep-like bump doesn't end it; it only ends when
+ * (and GPS turns off at the same time):
+ *  - GPS reads under 3 mph for 2 minutes, ignoring drift (see [StopDetector]),
+ *  - there's been no GPS fix for 2 minutes (indoors, in a garage),
+ *  - the car's Bluetooth disconnects and motion says still or walking,
+ *  - the phone is still and the motion sensors pause, or
  *  - the motion sensors report walking for 30 seconds in a row, with no GPS speed over 5 mph.
  *
- * To save battery, GPS turns off again after 2 minutes without movement (no vehicle-like
- * motion and no GPS speed over 5 mph), straight away once the motion sensors pause because
- * the phone is still, or after 3 minutes without a single fix.
+ * When not in a vehicle, GPS turns off again after 2 minutes without movement (no
+ * vehicle-like motion and no GPS speed over 5 mph), straight away once the motion sensors
+ * pause because the phone is still, after 2 minutes without a fix, or after 3 minutes
+ * without a first fix.
  *
  * Separately, for saved places, it takes one quick fix when you arrive somewhere or every
  * few minutes while walking. Never if no places are saved.
@@ -47,6 +52,7 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
 
     private val gps = GpsReader(context)
     private val speedConfirmer = SpeedConfirmer(log = SensingLog::add)
+    private val stopDetector = StopDetector(log = SensingLog::add)
     private val jobs = mutableListOf<Job>()
 
     private var places = emptyList<Place>()
@@ -57,10 +63,16 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
     /** While in a vehicle: when continuous walking started (the leave timer), or null. */
     private var walkingSinceAt: Long? = null
 
+    /** When the car's Bluetooth last disconnected, until motion says still or walking. */
+    private var carDisconnectedAt: Long? = null
+
     // While GPS is on.
     private var watchJob: Job? = null
     private var gpsOnAt = 0L
     private var firstFixAt: Long? = null
+    private var lastFixAt = 0L
+    /** True once the no-fix off-timer has been logged as started. */
+    private var noFixTimerLogged = false
     private var lastMovementAt = 0L
     private var lastGpsMovementAt = Long.MIN_VALUE / 2
     private var lastFixLoggedAt = Long.MIN_VALUE / 2
@@ -92,7 +104,11 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
                 .distinctUntilChanged()
                 .collect { connected ->
                     // Ignore the value read at startup; only react to a new connection.
-                    if (connected && wasConnected == false) startGps("car Bluetooth connected")
+                    if (connected && wasConnected == false) {
+                        carDisconnectedAt = null
+                        startGps("car Bluetooth connected")
+                    }
+                    if (!connected && wasConnected == true) onCarDisconnected()
                     wasConnected = connected
                 }
         }
@@ -129,6 +145,7 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
         if (changed) SensingLog.add("Motion: ${motion.label}${if (reading.paused) " (sensors paused)" else ""}.")
 
         checkWalkingAway(reading, now)
+        checkCarLeft(reading, now)
 
         when {
             // GPS says we're moving: trust it over the motion sensors. A phone in a mount on
@@ -147,7 +164,10 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
             }
             // Bumps and turns in a car can read as "Moving"; that keeps GPS on, but
             // doesn't turn it on (picking up the phone would do that too often).
-            reading.raw == Motion.UNKNOWN && gps.isRunning -> lastMovementAt = now
+            // Not once in a vehicle: carrying the phone around indoors reads as "Moving"
+            // too, and kept GPS (and "In a vehicle") on forever. There, GPS speed decides.
+            reading.raw == Motion.UNKNOWN && gps.isRunning && !LocationStatus.reading.value.inVehicle ->
+                lastMovementAt = now
         }
 
         val walkingAWhile = motion == Motion.WALKING && now - lastPlaceCheckAt >= WALKING_RECHECK_MS
@@ -190,8 +210,38 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
         }
     }
 
+    private fun onCarDisconnected() {
+        val now = SystemClock.elapsedRealtime()
+        if (!LocationStatus.reading.value.inVehicle && !gps.isRunning) return
+        carDisconnectedAt = now
+        SensingLog.add("Car Bluetooth disconnected: leaving the vehicle as soon as motion says still or walking.")
+        MotionStatus.reading.value?.let { checkCarLeft(it, now) }
+    }
+
+    /**
+     * After the car's Bluetooth disconnects (within [CAR_LEFT_WINDOW_MS]), the first motion
+     * reading that says still or walking ends "In a vehicle" and turns GPS off straight away,
+     * unless GPS still shows you moving.
+     */
+    private fun checkCarLeft(reading: MotionReading, now: Long) {
+        val since = carDisconnectedAt ?: return
+        if (now - since > CAR_LEFT_WINDOW_MS) {
+            carDisconnectedAt = null
+            return
+        }
+        val settled = reading.paused || reading.raw == Motion.STILL || reading.raw == Motion.WALKING
+        if (!settled) return
+        val speed = LocationStatus.reading.value.speedMph
+        if (gps.isRunning && speed != null && speed >= MOVING_MPH) return // still rolling
+        carDisconnectedAt = null
+        val what = if (reading.paused) "still" else reading.raw.label.lowercase()
+        if (gps.isRunning) stopGps("Car disconnected and motion says $what.")
+        leaveVehicle("Car Bluetooth disconnected and motion says $what")
+    }
+
     private fun leaveVehicle(why: String) {
         walkingSinceAt = null
+        stopDetector.reset()
         if (!LocationStatus.reading.value.inVehicle) return
         SensingLog.add("$why: no longer in a vehicle.")
         LocationStatus.update { it.copy(inVehicle = false) }
@@ -207,6 +257,8 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
         }
 
         speedConfirmer.reset()
+        stopDetector.reset()
+        noFixTimerLogged = false
         firstFixAt = null
         gpsOnAt = now
         lastMovementAt = now
@@ -230,11 +282,28 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
                     if (waited >= NO_FIX_GIVE_UP_MS) {
                         retryAt = t + RETRY_MS
                         stopGps("No GPS fix in ${waited / 1000} s; it may not see the sky. Trying again after ${clockTime(retryAt)}.")
+                        leaveVehicle("No GPS fix")
                         return@launch
                     }
                     if (waited / 30_000L > noFixLogged) {
                         noFixLogged++
                         SensingLog.add("No GPS fix yet after ${waited / 1000} s (finding satellites can take a minute).")
+                    }
+                } else {
+                    // Fixes were coming in and stopped: probably indoors or in a garage.
+                    val gap = t - lastFixAt
+                    if (gap >= NO_FIX_OFF_MS) {
+                        stopGps("No GPS fix for ${gap / 1000} s (probably indoors).")
+                        leaveVehicle("No GPS fix for ${NO_FIX_OFF_MS / 60_000} minutes")
+                        return@launch
+                    }
+                    if (gap >= NO_FIX_NOTICE_MS && !noFixTimerLogged) {
+                        noFixTimerLogged = true
+                        SensingLog.add(
+                            "No GPS fix for ${gap / 1000} s: off-timer started; GPS off" +
+                                (if (LocationStatus.reading.value.inVehicle) " and leaving the vehicle" else "") +
+                                " ${NO_FIX_OFF_MS / 60_000} min after the last fix unless one arrives."
+                        )
                     }
                 }
                 if (t - lastMovementAt >= STILL_OFF_MS) {
@@ -260,6 +329,11 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
             firstFixAt = now
             SensingLog.add("First GPS fix after ${(now - gpsOnAt) / 1000} s.")
         }
+        if (noFixTimerLogged) {
+            noFixTimerLogged = false
+            SensingLog.add("GPS fix again after ${(now - lastFixAt) / 1000} s: no-fix off-timer reset.")
+        }
+        lastFixAt = now
         matchPlace(location)
 
         // GPS gives a fix every second; log one line every 5 seconds so the log stays readable.
@@ -267,8 +341,10 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
         val logThisFix = now - lastFixLoggedAt >= FIX_LOG_GAP_MS
         if (logThisFix) lastFixLoggedAt = now
         val accuracy = if (location.hasAccuracy()) " ±%.0f m".format(location.accuracy) else ""
+        val accuracyMeters = if (location.hasAccuracy()) location.accuracy else null
         if (!location.hasSpeed()) {
             if (logThisFix) SensingLog.add("Fix with no speed$accuracy.")
+            checkStopped(null, accuracyMeters, now)
             return
         }
         val speed = location.speed
@@ -293,7 +369,17 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
                 "Over %.0f mph for %d s: in a vehicle (%.0f s after GPS on)."
                     .format(SpeedConfirmer.MIN_MPH, SpeedConfirmer.HOLD_MILLIS / 1000, (now - gpsOnAt) / 1000f)
             )
+            return
         }
+        checkStopped(mph, accuracyMeters, now)
+    }
+
+    /** While in a vehicle: 2 minutes under 3 mph (drift ignored) ends it and turns GPS off. */
+    private fun checkStopped(mph: Float?, accuracyMeters: Float?, now: Long) {
+        if (!LocationStatus.reading.value.inVehicle) return
+        if (!stopDetector.add(mph, accuracyMeters, now)) return
+        stopGps("Under %.0f mph for %d minutes.".format(StopDetector.STOP_MPH, StopDetector.HOLD_MILLIS / 60_000))
+        leaveVehicle("Parked")
     }
 
     // Saved places
@@ -343,6 +429,9 @@ class LocationSensing(private val context: Context, private val scope: Coroutine
         const val GPS_MOVEMENT_TRUST_MS = 15_000L      // GPS movement this recent beats the motion sensors
         const val WALK_OUT_MS = 30_000L                // walking this long (GPS under 5 mph) ends "in a vehicle"
         const val NO_FIX_GIVE_UP_MS = 3 * 60_000L      // give up if no fix at all in 3 minutes
+        const val NO_FIX_OFF_MS = 2 * 60_000L          // fixes stopped this long: GPS off, out of the vehicle
+        const val NO_FIX_NOTICE_MS = 10_000L           // log the no-fix off-timer once fixes stop this long
+        const val CAR_LEFT_WINDOW_MS = 2 * 60_000L     // after a car disconnect, watch motion this long
         const val RETRY_MS = 60_000L                   // then wait a minute before trying again
         const val WATCH_EVERY_MS = 5_000L
         const val PLACE_CHECK_MIN_GAP_MS = 2 * 60_000L // at most one place fix every 2 minutes

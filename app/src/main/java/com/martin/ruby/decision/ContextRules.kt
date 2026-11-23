@@ -78,6 +78,35 @@ object ContextRules {
 }
 
 /**
+ * Remembers the decisions of the last [windowMillis] and picks the strongest: the
+ * highest in [ContextState.Kind]'s order of confidence (Driving first, "Not sure yet"
+ * last). Used to tag a saved note, so pulling the phone out to type doesn't tag it
+ * "Moving" when you were walking a moment ago. A tie goes to the newest.
+ */
+class RecentStates(private val windowMillis: Long = WINDOW_MILLIS) {
+
+    private val entries = ArrayDeque<Pair<Long, ContextState>>()
+
+    fun add(state: ContextState, timeMillis: Long) {
+        entries.addLast(timeMillis to state)
+        while (timeMillis - entries.first().first > windowMillis) entries.removeFirst()
+    }
+
+    /** The strongest state seen in the last [windowMillis], or null if none. */
+    fun strongest(timeMillis: Long): ContextState? = entries
+        .filter { (time, _) -> timeMillis - time <= windowMillis }
+        .minWithOrNull(compareBy<Pair<Long, ContextState>> { it.second.kind.ordinal }.thenByDescending { it.first })
+        ?.second
+
+    fun clear() = entries.clear()
+
+    companion object {
+        /** "The last few seconds": at least two decisions, which come every 5 s or sooner. */
+        const val WINDOW_MILLIS = 10_000L
+    }
+}
+
+/**
  * Only changes the state once a new one has held for [holdMillis], so a short blip
  * (a stoplight, picking up the phone) doesn't flip it back and forth.
  *

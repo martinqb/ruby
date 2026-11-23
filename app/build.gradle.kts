@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -25,6 +26,7 @@ android {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
             }
+            proguardFiles("proguard-rules.pro")
         }
     }
     compileOptions {
@@ -33,7 +35,14 @@ android {
     }
     buildFeatures {
         compose = true
+        // BuildConfig.DEBUG hides the storage limit's testing tools in release builds.
+        buildConfig = true
     }
+}
+
+// Room saves each version of the memory database layout here, so upgrades can be checked.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
@@ -46,6 +55,17 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    // Phase 6: the encrypted memory database.
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+    implementation(libs.sqlcipher.android)
+    // Phase 6: authorizing backups to the user's Google Drive (drive.appdata only).
+    implementation(libs.play.services.auth)
+    // Phase 6: the nightly backup while charging on Wi-Fi.
+    implementation(libs.androidx.work.runtime.ktx)
+    // Chatting with Claude through Anthropic's API.
+    implementation(libs.anthropic.java)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

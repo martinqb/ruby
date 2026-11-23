@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -22,9 +23,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
+import com.martin.ruby.backup.BackupManager
+import com.martin.ruby.backup.BackupStatusStore
+import com.martin.ruby.backup.NightlyBackup
 import com.martin.ruby.bluetooth.CarBluetooth
+import com.martin.ruby.chat.ChatSession
 import com.martin.ruby.data.CarSettings
 import com.martin.ruby.data.Place
 import com.martin.ruby.data.PlaceStore
@@ -32,35 +38,64 @@ import com.martin.ruby.decision.ContextStatus
 import com.martin.ruby.location.GpsReader
 import com.martin.ruby.location.LocationStatus
 import com.martin.ruby.log.SensingLog
+import com.martin.ruby.memory.MemoryStore
 import com.martin.ruby.motion.MotionSensor
 import com.martin.ruby.motion.MotionStatus
 import com.martin.ruby.sensing.BackgroundSensing
+import com.martin.ruby.ui.BackupScreen
 import com.martin.ruby.ui.CarPickerScreen
+import com.martin.ruby.ui.ChatActions
+import com.martin.ruby.ui.ChatScreen
 import com.martin.ruby.ui.MainActions
 import com.martin.ruby.ui.MainScreen
 import com.martin.ruby.ui.MainUiState
+import com.martin.ruby.ui.MemoryScreen
 import com.martin.ruby.ui.PlacesScreen
+import com.martin.ruby.ui.RemindersScreen
+import com.martin.ruby.reminders.ReminderStore
+import com.martin.ruby.ui.ExportScreen
+import com.martin.ruby.ui.StorageScreen
 import com.martin.ruby.ui.theme.RubyTheme
+import com.martin.ruby.voice.VoiceSession
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Which screen is showing. */
-private enum class Screen { MAIN, CAR_PICKER, PLACES }
+private enum class Screen { MAIN, CHAT, REMINDERS, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT }
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var settings: CarSettings
     private lateinit var placeStore: PlaceStore
+    private lateinit var memoryStore: MemoryStore
+    private lateinit var backupManager: BackupManager
 
     // Compose redraws the screen whenever these change.
     private var hasBluetoothPermission by mutableStateOf(false)
     private var hasActivityPermission by mutableStateOf(false)
     private var hasLocationPermission by mutableStateOf(false)
     private var hasBackgroundLocation by mutableStateOf(false)
+    private var hasMicPermission by mutableStateOf(false)
     private var gpsEnabled by mutableStateOf(true)
     private var batteryOptimized by mutableStateOf(false)
     private var savingPlace by mutableStateOf(false)
     private var placeMessage by mutableStateOf<String?>(null)
+
+    /** Set when a notification (e.g. "approve Drive access again") asks for the Backup screen. */
+    private var openBackupRequested by mutableStateOf(false)
+
+    /** Set when the "memory is full" notification asks for the Storage screen. */
+    private var openStorageRequested by mutableStateOf(false)
+
+    /** Set when a reminder's notification is tapped. */
+    private var openRemindersRequested by mutableStateOf(false)
+
+    /** Asked the first time the user taps Talk; if they allow it, Ruby starts listening. */
+    private val micLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            hasMicPermission = granted
+            if (granted) listen()
+        }
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -71,7 +106,22 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         settings = CarSettings(applicationContext)
         placeStore = PlaceStore(applicationContext)
+        memoryStore = MemoryStore(applicationContext)
+        backupManager = BackupManager(applicationContext)
+        openBackupRequested = intent?.getBooleanExtra(EXTRA_OPEN_BACKUP, false) == true
+        openStorageRequested = intent?.getBooleanExtra(EXTRA_OPEN_STORAGE, false) == true
+        openRemindersRequested = intent?.getBooleanExtra(EXTRA_OPEN_REMINDERS, false) == true
         checkPermissions()
+        ChatSession.checkKey(applicationContext)
+        VoiceSession.start(applicationContext)
+
+        // Android's own backup can bring "nightly is on" to a new phone without the
+        // scheduled job, so make sure it's scheduled. Scheduling again changes nothing.
+        lifecycleScope.launch {
+            if (BackupStatusStore(applicationContext).current().nightlyOn && backupManager.isSetUp()) {
+                NightlyBackup.schedule(applicationContext)
+            }
+        }
 
         // Ask the first time the app opens (or the first time after an update adds a permission).
         // Location is asked for separately, when the user taps "Allow location".
@@ -90,9 +140,25 @@ class MainActivity : ComponentActivity() {
                 val location by LocationStatus.reading.collectAsState()
                 val places by placeStore.places.collectAsState(initial = emptyList())
                 val log by SensingLog.entries.collectAsState()
+                val chat by ChatSession.ui.collectAsState()
+                val voice by VoiceSession.ui.collectAsState()
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
+                if (openStorageRequested) {
+                    openStorageRequested = false
+                    screen = Screen.STORAGE
+                }
+                if (openRemindersRequested) {
+                    openRemindersRequested = false
+                    screen = Screen.REMINDERS
+                }
+                if (openBackupRequested) {
+                    openBackupRequested = false
+                    screen = Screen.BACKUP
+                }
 
-                if (screen != Screen.MAIN) BackHandler { screen = Screen.MAIN }
+                if (screen != Screen.MAIN) BackHandler {
+                    screen = if (screen == Screen.BACKUP || screen == Screen.STORAGE || screen == Screen.EXPORT) Screen.MEMORY else Screen.MAIN
+                }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     val modifier = Modifier.padding(innerPadding)
@@ -113,6 +179,66 @@ class MainActivity : ComponentActivity() {
                                 modifier = modifier,
                             )
                         }
+
+                        Screen.CHAT -> ChatScreen(
+                            ui = chat,
+                            voice = voice,
+                            hasMicPermission = hasMicPermission,
+                            context = context?.state?.label,
+                            actions = ChatActions(
+                                onSend = { text -> ChatSession.send(applicationContext, text) },
+                                onSaveKey = { key -> ChatSession.saveKey(applicationContext, key) },
+                                onForgetKey = { ChatSession.forgetKey(applicationContext) },
+                                onNewConversation = ChatSession::newConversation,
+                                onDismissError = ChatSession::dismissError,
+                                onTalk = ::listen,
+                                onAllowMic = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                                onDoneTalking = VoiceSession::finishListening,
+                                onCancelTalking = VoiceSession::cancelListening,
+                                onDismissNote = VoiceSession::dismissNote,
+                                onPlay = VoiceSession::play,
+                                onStopSpeaking = VoiceSession::stopSpeaking,
+                                onSaveVoice = { prefs -> VoiceSession.save(applicationContext, prefs) },
+                                onTestVoice = {
+                                    VoiceSession.play("Hello. I'm Ruby. This is how I sound right now.")
+                                },
+                                onBack = { screen = Screen.MAIN },
+                            ),
+                            modifier = modifier,
+                        )
+
+                        Screen.REMINDERS -> RemindersScreen(
+                            store = remember { ReminderStore(applicationContext) },
+                            onBack = { screen = Screen.MAIN },
+                            modifier = modifier,
+                        )
+
+                        Screen.MEMORY -> MemoryScreen(
+                            store = memoryStore,
+                            onOpenBackup = { screen = Screen.BACKUP },
+                            onOpenStorage = { screen = Screen.STORAGE },
+                            onOpenExport = { screen = Screen.EXPORT },
+                            onBack = { screen = Screen.MAIN },
+                            modifier = modifier,
+                        )
+
+                        Screen.BACKUP -> BackupScreen(
+                            manager = backupManager,
+                            onBack = { screen = Screen.MEMORY },
+                            modifier = modifier,
+                        )
+
+                        Screen.STORAGE -> StorageScreen(
+                            store = memoryStore,
+                            onBack = { screen = Screen.MEMORY },
+                            modifier = modifier,
+                        )
+
+                        Screen.EXPORT -> ExportScreen(
+                            store = memoryStore,
+                            onBack = { screen = Screen.MEMORY },
+                            modifier = modifier,
+                        )
 
                         Screen.PLACES -> PlacesScreen(
                             places = places,
@@ -153,6 +279,9 @@ class MainActivity : ComponentActivity() {
                                 onAllowLocation = ::requestLocation,
                                 onAllowLocationAllTheTime = ::requestBackgroundLocation,
                                 onOpenPlaces = { screen = Screen.PLACES },
+                                onOpenChat = { screen = Screen.CHAT },
+                                onOpenMemory = { screen = Screen.MEMORY },
+                                onOpenReminders = { screen = Screen.REMINDERS },
                                 onTestGps = { BackgroundSensing.testGps(this) },
                                 onClearLog = SensingLog::clear,
                             ),
@@ -162,6 +291,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_OPEN_BACKUP, false)) openBackupRequested = true
+        if (intent.getBooleanExtra(EXTRA_OPEN_STORAGE, false)) openStorageRequested = true
+        if (intent.getBooleanExtra(EXTRA_OPEN_REMINDERS, false)) openRemindersRequested = true
     }
 
     override fun onResume() {
@@ -180,6 +316,13 @@ class MainActivity : ComponentActivity() {
         hasBackgroundLocation = GpsReader.hasBackgroundLocation(this)
         gpsEnabled = GpsReader(this).isGpsOn()
         batteryOptimized = BackgroundSensing.isBatteryOptimized(this)
+        hasMicPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
+    /** Listens once, and sends what the user said; the reply may then be read aloud. */
+    private fun listen() {
+        VoiceSession.listen { heard -> ChatSession.send(applicationContext, heard, spoken = true) }
     }
 
     private fun onPermissionsChanged() {
@@ -276,5 +419,16 @@ class MainActivity : ComponentActivity() {
             // Some phones don't have the dialog; open the battery settings list instead.
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
         }
+    }
+
+    companion object {
+        /** Intent extra: open straight to the Backup screen. */
+        const val EXTRA_OPEN_BACKUP = "com.martin.ruby.OPEN_BACKUP"
+
+        /** Intent extra: open straight to the memory Storage screen. */
+        const val EXTRA_OPEN_STORAGE = "com.martin.ruby.OPEN_STORAGE"
+
+        /** Intent extra: open straight to the Reminders screen. */
+        const val EXTRA_OPEN_REMINDERS = "com.martin.ruby.OPEN_REMINDERS"
     }
 }

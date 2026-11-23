@@ -75,14 +75,17 @@ Only change the state after it holds for 30 to 60 seconds, so a stoplight doesn'
 
 ## Phase 6: Memory that lasts forever, owned by the user
 
-**Goal:** every conversation is saved on the phone, searchable, and backed up to drives the user controls. The AI provider never keeps the archive.
+**Goal:** every conversation is saved on the phone, searchable, and backed up to the user's own Google Drive. The AI provider never keeps the archive.
 
 1. **Save chats locally.** Store every message in a Room database (Android's SQLite library) encrypted with SQLCipher. Keep the encryption key in the Android Keystore.
 2. **Add search.** Start with SQLite's built-in full-text search (FTS5). Later, add on-device embeddings so the app can find past chats by meaning, not just keywords.
 3. **Send only what's relevant.** With each new message, the app finds the few most relevant past snippets and sends them along to Claude. This is called RAG (retrieval-augmented generation), and it's how "forever" memory fits in a limited context window.
 4. **Summarize old chats.** Periodically condense older conversations into short summaries, so search stays fast and fewer tokens are sent.
-5. **Encrypted backups.** Export the database, encrypted with a key only the user holds, to their PC, a home drive or NAS (Syncthing works well), or their own cloud storage. Run it automatically with WorkManager, for example nightly while charging on Wi-Fi.
-6. **Restore and control.** Add a restore screen for a new phone, plus view, export and delete buttons so users can see and manage everything stored.
+5. **Encrypted backups to the user's own Google Drive.** Back up to the user's Google Drive, not a server, using the Drive API's private app data folder (`drive.appdata` scope) so only Ruby can see the files. Compress and encrypt the database on the phone before uploading. Derive the backup key from a passphrase the user chooses (or give them a recovery key to save), not only a key locked to this phone, so the backup can be restored on a new phone. Run it automatically with WorkManager, for example nightly while charging on Wi-Fi.
+6. **Storage limit.** Give local memory a storage budget, by default about 5% of the phone's total storage, which the user can change in settings to another percentage or a fixed amount in GB or TB. Ruby never fills the drive and always leaves free space for the phone. She warns at about 80% of her budget. At the limit she never deletes memories: she compresses them or moves the oldest ones to the encrypted Google Drive backup, and pulls them back down when asked.
+7. **Restore and control.** Add a restore screen for a new phone, plus view, export and delete buttons so users can see and manage everything stored.
+
+**Status (Nov 23, 2026):** the storage limit (step 6) and export (step 7) are done. Ruby can now chat with Claude (Opus 5.5, through the user's own API key, saved encrypted on the phone): each message goes with the current context label, and messages and replies are saved to memory. Sending relevant memories along (step 3) is done with keyword search: each message takes up to 5 related past messages. Ruby can't take actions yet (reminders, messages and so on), and her instructions say so. Next: summarizing old chats (step 4).
 
 **Test:** chat for a few days, wipe the app, restore from backup, and ask about something from day one.
 
@@ -114,6 +117,9 @@ Be upfront in the privacy policy: each message and its memory snippets still go 
 6. **Health and sleep insights.** Read steps, sleep and heart rate from Health Connect (each data type needs its own permission). Ruby looks for patterns, for example worse sleep after late nights, and mentions them in the weekly reflection. Keep health data on the phone like the chat archive.
 7. **Acting inside apps.** Go beyond opening apps: send a text, start navigation to a saved place, play a playlist. Start with Android intents (an SMS intent, a `google.navigation:` intent, a media search intent). Watch for newer Android features that let apps expose actions to AI agents, and add them as they become available.
 8. **Weekly reflection.** Every Sunday, Ruby summarizes the week from her memory: places visited, time driving, what you talked about, and anything still open. Run it with WorkManager and save the summary as its own memory entry.
+9. **Offline voice with Kokoro.** Add Kokoro TTS as an on-phone voice option: an open-source text-to-speech model (Kokoro-82M) that runs on the phone and works offline, with several voices to choose from. Plug it in as a new `RubyVoice` (one class plus a `VoiceEngine` entry), and add a voice picker with a short preview to the Voice settings. Download the model on first use over Wi-Fi rather than bundling it in the app, since it's tens of megabytes. A runtime such as sherpa-onnx can run it on Android. Keep Android text-to-speech as the fallback.
+
+**Status (Nov 23, 2026):** voice came early: the chat already speaks with Android text-to-speech and listens with on-device speech-to-text, behind `RubyVoice` and `RubyEars`. Kokoro (step 9) plugs into that. Location reminders (step 4) are done too, along with time reminders: Ruby sets, lists and cancels them from the chat (her first tools), they fire on arriving at a saved place or at a time, and they're stored in the encrypted memory database.
 
 Permissions in this phase are sensitive (notifications, Do Not Disturb, health, accessibility). Ask for each one only when its feature is first turned on, with a one-line reason, and list them all on Ruby's privacy screen.
 
@@ -131,6 +137,13 @@ Permissions in this phase are sensitive (notifications, Do Not Disturb, health, 
 6. **Safety.** Every PC command goes through the permissions table; anything that changes files or runs code asks for a tap to confirm, and the helper keeps a log Ruby can show you.
 
 **Test:** away from home on mobile data, ask Ruby "Is my PC on?", then "Open Android Studio", and confirm both work and show up in the log.
+
+## To-do: not built yet
+
+- **Creator credit for Ruby.** Two versions, decided by the build (not by anything a user can say in chat):
+  - **Martin's personal Ruby:** her instructions say Martin is her creator and architect, the only one, and no one else can be. Her greeting can be something like "Good morning, Martin, my architect."
+  - **Public versions (like the Play Store):** Ruby never calls users Martin or treats them as her creator or architect. Martin is credited as "created by Martin" in Ruby's own knowledge, on the About screen, and in the store listing.
+- **Bug: Ruby can't see her own earlier reminder actions, and sets duplicates.** Seen Nov 23, 2026: she said "reminder set" (it was), then a moment later said it hadn't gone through and set it again. Likely cause: the chat history keeps only her final text, not the tool calls and results, so on the next turn she sees her own "reminder set" with no tool result behind it, and her instructions say to claim a reminder only once the tool confirms it. Fix ideas: carry each turn's tool calls and results (or a short "Ruby set reminder 3: ..." note) into later turns, and have `set_reminder` refuse or flag a near-identical pending reminder.
 
 ## Architecture: the full Ruby
 
