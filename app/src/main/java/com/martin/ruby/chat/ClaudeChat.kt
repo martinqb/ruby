@@ -20,6 +20,9 @@ import com.anthropic.models.beta.messages.BetaToolChoiceNone
 import com.anthropic.models.beta.messages.BetaToolResultBlockParam
 import com.anthropic.models.beta.messages.BetaToolUseBlock
 import com.anthropic.models.beta.messages.MessageCreateParams
+import android.util.Log
+import com.martin.ruby.BuildConfig
+import com.martin.ruby.log.SensingLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -51,22 +54,43 @@ class ReplyTranscript internal constructor(
     internal val rounds: List<Pair<BetaMessage, List<BetaContentBlockParam>>>,
     /** Claude's last message in the reply, or null if it had nothing to send again. */
     internal val final: BetaMessage?,
-)
+) {
+    /** The same, without Claude's thinking (text and tool calls stay). See [ClaudeChat.withoutThinking]. */
+    fun withoutThinking() = ReplyTranscript(
+        rounds.map { (message, results) -> ClaudeChat.withoutThinking(message) to results },
+        final?.let(ClaudeChat::withoutThinking),
+    )
+}
 
 /**
  * Talks to Claude through Anthropic's API. What's sent: the conversation so far, and with
  * each message, the decision engine's short label (e.g. "Driving"), the time, and a few
  * related past messages from memory. Nothing else from the phone's sensors leaves the phone.
  */
-class ClaudeChat(apiKey: String) {
+class ClaudeChat(apiKey: String, baseUrl: String? = null) {
 
-    /** Something went wrong; [message] is written for the user. */
+    /** Something went wrong; [message] is written for the user, never raw API output. */
     class ChatError(message: String, cause: Throwable? = null) : Exception(message, cause)
 
-    /** Claude's answer, what it did with tools on the way, and the whole exchange for later turns. */
-    data class Reply(val text: String, val actions: List<String>, val transcript: ReplyTranscript)
+    /** Anthropic refused Claude's earlier thinking blocks; see [isThinkingRejection]. */
+    private class ThinkingRejected(cause: Throwable) : Exception(cause)
 
-    private val client: AnthropicClient = AnthropicOkHttpClient.builder().apiKey(apiKey).build()
+    /**
+     * Claude's answer, what it did with tools on the way, and the whole exchange for later
+     * turns. [thinkingStripped]: earlier thinking was refused and removed to get this answer,
+     * so the caller must drop thinking from earlier turns too (see [ReplyTranscript.withoutThinking]).
+     */
+    data class Reply(
+        val text: String,
+        val actions: List<String>,
+        val transcript: ReplyTranscript,
+        val thinkingStripped: Boolean = false,
+    )
+
+    private val client: AnthropicClient = AnthropicOkHttpClient.builder()
+        .apiKey(apiKey)
+        .apply { if (baseUrl != null) baseUrl(baseUrl) } // tests use a stand-in server
+        .build()
 
     /**
      * Sends [history] (oldest first, ending with the user's newest message) and returns
@@ -74,15 +98,28 @@ class ClaudeChat(apiKey: String) {
      * sent back, until Claude answers. [onText] gets the visible reply so far as it streams
      * in (from any thread). Throws [ChatError].
      */
-    suspend fun reply(history: List<ChatTurn>, toolBox: ToolBox?, onText: (String) -> Unit): Reply {
+    suspend fun reply(
+        history: List<ChatTurn>,
+        toolBox: ToolBox?,
+        /**
+         * Debug builds only: send the first request with one tool description changed, the
+         * kind of change that used to break the chat, to check the safety net on a phone.
+         */
+        alterToolsOnce: Boolean = false,
+        onText: (String) -> Unit,
+    ): Reply {
         require(history.isNotEmpty() && history.last().fromUser) { "The last turn must be the user's." }
 
         // This reply's tool rounds so far: Claude's message, then the results sent back.
         val rounds = mutableListOf<Pair<BetaMessage, List<BetaContentBlockParam>>>()
         val shown = mutableListOf<String>() // text from earlier rounds
         val actions = mutableListOf<String>()
+        // Set once Anthropic has refused earlier thinking: from then on, none is sent.
+        var stripped = false
+        fun replayed(message: BetaMessage) = if (stripped) withoutThinking(message) else message
 
-        for (round in 0..MAX_TOOL_ROUNDS) {
+        var round = 0
+        while (round <= MAX_TOOL_ROUNDS) {
             val params = MessageCreateParams.builder()
                 .model(MODEL)
                 .maxTokens(16_000L)
@@ -96,7 +133,12 @@ class ClaudeChat(apiKey: String) {
                 .apply {
                     // Tools are always listed (earlier turns' tool calls need them), but the last
                     // round doesn't allow calling them, so Claude has to answer.
-                    toolBox?.tools?.forEach { addTool(it) }
+                    val tools = toolBox?.tools.orEmpty()
+                    val altered = alterToolsOnce && BuildConfig.DEBUG && !stripped && round == 0
+                    tools.forEachIndexed { i, tool ->
+                        addTool(if (altered && i == tools.lastIndex) tool.toBuilder().description(tool.description().orElse("") + " (changed)").build() else tool)
+                    }
+                    if (altered) logError("Debug: sending this message with a changed tool list", null)
                     if (toolBox != null && round == MAX_TOOL_ROUNDS) toolChoice(BetaToolChoiceNone.builder().build())
                     history.forEach { turn ->
                         val transcript = turn.transcript
@@ -104,22 +146,34 @@ class ClaudeChat(apiKey: String) {
                             turn.fromUser -> addUserMessage(turn.sent ?: turn.text)
                             transcript != null && toolBox != null -> {
                                 transcript.rounds.forEach { (message, results) ->
-                                    addMessage(message)
+                                    addMessage(replayed(message))
                                     addMessage(BetaMessageParam.ofUserOfContentBlockParams(results))
                                 }
-                                transcript.final?.let { addMessage(it) }
+                                transcript.final?.let { addMessage(replayed(it)) }
                             }
                             else -> addAssistantMessage(turn.text)
                         }
                     }
                     rounds.forEach { (message, results) ->
-                        addMessage(message)
+                        addMessage(replayed(message))
                         addMessage(BetaMessageParam.ofUserOfContentBlockParams(results))
                     }
                 }
                 .build()
 
-            val message = stream(params) { current -> onText(join(shown + current)) }
+            val message = try {
+                stream(params) { current -> onText(join(shown + current)) }
+            } catch (e: ThinkingRejected) {
+                // Safety net: something in the history changed under Claude's earlier thinking.
+                // Retry this request once without any thinking from earlier turns (their text
+                // and tool calls stay); if that fails too, give up politely.
+                if (stripped) throw ChatError(LOST_TRAIN_OF_THOUGHT, e.cause)
+                logError("Anthropic refused earlier thinking; retrying once without it", e.cause)
+                stripped = true
+                // Thinking already made in this reply was made against the old history: drop it too.
+                rounds.replaceAll { (m, r) -> withoutThinking(m) to r }
+                continue
+            }
             val stopReason = message.stopReason().orElse(null)
             if (stopReason == BetaStopReason.REFUSAL) {
                 // A partial reply cut off by a refusal isn't a real answer, and a tool call in it
@@ -135,6 +189,7 @@ class ClaudeChat(apiKey: String) {
                 // All results go back together in one message.
                 val results = toolUses.map { use -> runTool(toolBox, use, actions) }
                 rounds += message.toBuilder().content(echoable(message)).build() to results
+                round++
                 continue
             }
 
@@ -145,14 +200,14 @@ class ClaudeChat(apiKey: String) {
             val transcript = ReplyTranscript(rounds.toList(), final)
             val all = join(if (text.isEmpty()) shown else shown + text)
             if (all.isEmpty()) {
-                if (actions.isNotEmpty()) return Reply(actions.joinToString("\n"), actions, transcript)
+                if (actions.isNotEmpty()) return Reply(actions.joinToString("\n"), actions, transcript, stripped)
                 throw ChatError("Claude sent back an empty reply. Try again.")
             }
             // A tool call cut off by the length limit is never run; it just ends the reply.
             if (stopReason == BetaStopReason.MAX_TOKENS) {
-                return Reply("$all\n\n(The reply was too long and got cut off.)", actions, transcript)
+                return Reply("$all\n\n(The reply was too long and got cut off.)", actions, transcript, stripped)
             }
-            return Reply(all, actions, transcript)
+            return Reply(all, actions, transcript, stripped)
         }
         throw ChatError("Ruby got stuck using her tools. Try asking again.")
     }
@@ -179,9 +234,13 @@ class ClaudeChat(apiKey: String) {
             } catch (e: RateLimitException) {
                 throw ChatError("Too many messages at once. Wait a minute and try again.", e)
             } catch (e: InternalServerException) {
+                logError("Anthropic server error", e)
                 throw ChatError("Anthropic's servers had a problem. Try again in a moment.", e)
             } catch (e: AnthropicServiceException) {
-                throw ChatError("Anthropic returned an error (${e.statusCode()}): ${e.message}", e)
+                if (isThinkingRejection(e.message)) throw ThinkingRejected(e)
+                // Never show the API's raw error (it's JSON); log it whole instead.
+                logError("Anthropic returned ${e.statusCode()}", e)
+                throw ChatError(LOST_TRAIN_OF_THOUGHT, e)
             } catch (e: AnthropicIoException) {
                 throw ChatError("Couldn't reach Anthropic. Check the internet connection.", e)
             }
@@ -218,6 +277,29 @@ class ClaudeChat(apiKey: String) {
 
     companion object {
         const val MODEL = "claude-opus-5-5"
+
+        /** What Ruby says (and shows) when a reply fails for a reason the user can't act on. */
+        const val LOST_TRAIN_OF_THOUGHT = "Sorry, I lost my train of thought. Can you say that again?"
+
+        /**
+         * True for Anthropic's 400 about thinking blocks that no longer match the conversation
+         * (an earlier message, `system` or the tools changed after they were made), or whose
+         * signature can't be checked. Removing the thinking from earlier turns fixes either.
+         */
+        fun isThinkingRejection(message: String?): Boolean =
+            message != null && message.contains("Invalid `signature` in `thinking` block")
+
+        /** [message] without its thinking blocks; text, tool calls and anything else stay as they were. */
+        fun withoutThinking(message: BetaMessage): BetaMessage =
+            message.toBuilder().content(message.content().filterNot { it.isThinking() || it.isRedactedThinking() }).build()
+
+        /** The full error, to Android's log and Ruby's sensing log; the user sees a short message. */
+        fun logError(what: String, e: Throwable?) {
+            val detail = e?.message ?: e?.javaClass?.simpleName ?: ""
+            // Android's log isn't there in plain JVM tests; the sensing log always is.
+            runCatching { Log.e("RubyChat", "$what: $detail", e) }
+            SensingLog.add("Chat error ($what): $detail")
+        }
 
         /** How many times one reply may call tools before Claude must answer. */
         private const val MAX_TOOL_ROUNDS = 5
@@ -263,18 +345,26 @@ class ClaudeChat(apiKey: String) {
         /**
          * What's sent for a user message: the context label and time, the reminders waiting
          * right now (from [com.martin.ruby.reminders.ReminderText.snapshot], or null if they
-         * couldn't be read), then any memories, then what they typed, e.g.
-         * "[Right now: Driving · Mon, Nov 23, 2026, 3:42 PM (America/New_York)]".
+         * couldn't be read), the saved places, then any memories, then what they typed, e.g.
+         * "[Right now: Driving · Mon, Nov 23, 2026, 3:42 PM (America/New_York)]". Anything that
+         * changes goes here, in the newest message, never in `system` or the tools.
          */
-        fun compose(text: String, context: String?, now: String, reminders: String?, memories: String?): String =
-            buildString {
-                append("[Right now: ")
-                if (context != null) append("$context · ")
-                append("$now]\n")
-                if (reminders != null) append("[$reminders]\n")
-                if (memories != null) append("[$memories]\n\n")
-                append(text)
-            }
+        fun compose(
+            text: String,
+            context: String?,
+            now: String,
+            reminders: String?,
+            places: String?,
+            memories: String?,
+        ): String = buildString {
+            append("[Right now: ")
+            if (context != null) append("$context · ")
+            append("$now]\n")
+            if (reminders != null) append("[$reminders]\n")
+            if (places != null) append("[$places]\n")
+            if (memories != null) append("[$memories]\n\n")
+            append(text)
+        }
 
         private fun join(parts: List<String>): String = parts.filter { it.isNotEmpty() }.joinToString("\n\n")
 

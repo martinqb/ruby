@@ -47,7 +47,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.martin.ruby.BuildConfig
 import com.martin.ruby.chat.ApiKeyStore
+import com.martin.ruby.chat.ChatSession
 import com.martin.ruby.chat.ChatTurn
 import com.martin.ruby.chat.ChatUi
 import com.martin.ruby.voice.KokoroModel
@@ -105,6 +107,14 @@ fun ChatScreen(
                         Text("New chat")
                     }
                     TextButton(onClick = { showVoice = true }) { Text("Voice") }
+                    if (BuildConfig.DEBUG && ui.turns.isNotEmpty()) {
+                        // Checks the safety net for Anthropic refusing earlier thinking.
+                        var armed by remember(ui.turns.size) { mutableStateOf(ChatSession.breakNextMessage) }
+                        TextButton(onClick = {
+                            ChatSession.breakNextMessage = true
+                            armed = true
+                        }) { Text(if (armed) "Next message: changed tools" else "Test: change tools (debug)") }
+                    }
                     TextButton(onClick = { changingKey = true }) { Text("Change key") }
                 }
             }

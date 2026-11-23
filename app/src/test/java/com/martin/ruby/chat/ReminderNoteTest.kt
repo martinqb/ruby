@@ -22,7 +22,7 @@ class ReminderNoteTest {
     private val milk = Reminder(id = 4, text = "Buy milk", place = "Store", createdMillis = 0)
 
     private fun send(text: String, pending: List<Reminder>) =
-        ClaudeChat.compose(text, "At Home", "Mon, Nov 23, 2026, 1:10 PM (America/New_York)", ReminderText.snapshot(pending, zone), null)
+        ClaudeChat.compose(text, "At Home", "Mon, Nov 23, 2026, 1:10 PM (America/New_York)", ReminderText.snapshot(pending, zone), null, null)
 
     @Test
     fun afterACancel_theNextMessageNoLongerListsIt() {
@@ -37,11 +37,12 @@ class ReminderNoteTest {
     }
 
     @Test
-    fun theNoteComesBeforeMemoriesAndTheMessage() {
-        val sent = ClaudeChat.compose("When's the oven reminder?", null, "1:10 PM", ReminderText.snapshot(listOf(oven), zone), "From Ruby's memory: ...")
+    fun theNotesComeBeforeMemoriesAndTheMessage() {
+        val sent = ClaudeChat.compose("When's the oven reminder?", null, "1:10 PM", ReminderText.snapshot(listOf(oven), zone), "Saved places: Home.", "From Ruby's memory: ...")
         assertEquals(
             "[Right now: 1:10 PM]\n" +
                 "[Waiting reminders: 3: Check the oven (Mon, Nov 23, 2026, 1:25 PM).]\n" +
+                "[Saved places: Home.]\n" +
                 "[From Ruby's memory: ...]\n\n" +
                 "When's the oven reminder?",
             sent,
@@ -69,6 +70,6 @@ class ReminderNoteTest {
 
     @Test
     fun noNote_whenRemindersCouldntBeRead() {
-        assertEquals("[Right now: 1:10 PM]\nHi", ClaudeChat.compose("Hi", null, "1:10 PM", null, null))
+        assertEquals("[Right now: 1:10 PM]\nHi", ClaudeChat.compose("Hi", null, "1:10 PM", null, null, null))
     }
 }

@@ -5,51 +5,24 @@ import com.anthropic.core.JsonValue
 import com.anthropic.models.beta.messages.BetaTool
 import com.martin.ruby.chat.ToolBox
 import com.martin.ruby.chat.ToolOutcome
+import com.martin.ruby.data.PlaceStore
 import com.martin.ruby.log.SensingLog
+import kotlinx.coroutines.flow.first
 
 /**
- * The reminder tools Claude can call: set, list and cancel. [savedPlaces] are the names
- * of the user's saved places, the only places an arrival reminder can use.
+ * The reminder tools Claude can call: set, list and cancel.
+ *
+ * The tool definitions ([DEFINITIONS]) are fixed text, the same in every request. Claude's
+ * earlier thinking is only valid against the exact tools it was made with, so anything that
+ * changes (like the saved places) must not go in them: the places go in each message's
+ * note instead, and [run] checks against the places as they are when it runs.
  */
-class ReminderTools(context: Context, private val savedPlaces: List<String>) : ToolBox {
+class ReminderTools(context: Context) : ToolBox {
 
     private val appContext = context.applicationContext
     private val store = ReminderStore(appContext)
 
-    override val tools: List<BetaTool> = listOf(
-        tool(
-            SET,
-            "Set a reminder for the user. Give either `at` (a time) or `place` (arriving at a saved " +
-                "place), not both. Ruby shows it as a notification then.",
-            mapOf(
-                "text" to mapOf(
-                    "type" to "string",
-                    "description" to "What to remind them of, short and in their words, e.g. \"Call Mom\".",
-                ),
-                "at" to mapOf(
-                    "type" to "string",
-                    "description" to "Local date and time in the phone's time zone, as YYYY-MM-DDTHH:MM, e.g. " +
-                        "2026-11-24T17:00. Work it out from the current time in the user's message.",
-                ),
-                "place" to mapOf(
-                    "type" to "string",
-                    "description" to if (savedPlaces.isEmpty()) {
-                        "A saved place's name. The user has no saved places yet, so this can't be used."
-                    } else {
-                        "One of the user's saved places: ${savedPlaces.joinToString(", ")}. Fires when they arrive."
-                    },
-                ),
-            ),
-            required = listOf("text"),
-        ),
-        tool(LIST, "List the reminders that haven't gone off yet, with their ids.", emptyMap(), required = emptyList()),
-        tool(
-            CANCEL,
-            "Cancel a reminder by id (from list_reminders), for example when the user no longer needs it.",
-            mapOf("id" to mapOf("type" to "integer", "description" to "The reminder's id.")),
-            required = listOf("id"),
-        ),
-    )
+    override val tools: List<BetaTool> get() = DEFINITIONS
 
     override suspend fun run(name: String, input: Map<*, *>): ToolOutcome = try {
         when (name) {
@@ -71,6 +44,8 @@ class ReminderTools(context: Context, private val savedPlaces: List<String>) : T
         if ((at == null) == (placeAsked == null)) return ToolOutcome("Give either `at` or `place`, not both or neither.", isError = true)
 
         if (placeAsked != null) {
+            // The places as they are now, not when the conversation started.
+            val savedPlaces = PlaceStore(appContext).places.first().map { it.name }
             val place = savedPlaces.firstOrNull { it.equals(placeAsked, ignoreCase = true) }
                 ?: return ToolOutcome(
                     "\"$placeAsked\" isn't a saved place. Saved places: " +
@@ -132,27 +107,65 @@ class ReminderTools(context: Context, private val savedPlaces: List<String>) : T
         }
     }
 
-    private fun tool(name: String, description: String, properties: Map<String, Any>, required: List<String>): BetaTool =
-        BetaTool.builder()
-            .name(name)
-            .description(description)
-            .inputSchema(
-                BetaTool.InputSchema.builder()
-                    .properties(
-                        BetaTool.InputSchema.Properties.builder().apply {
-                            properties.forEach { (key, schema) -> putAdditionalProperty(key, JsonValue.from(schema)) }
-                        }.build()
-                    )
-                    .required(required)
-                    .build()
-            )
-            // Inputs stream as they're written; run() checks every field itself.
-            .eagerInputStreaming(true)
-            .build()
-
     companion object {
         const val SET = "set_reminder"
         const val LIST = "list_reminders"
         const val CANCEL = "cancel_reminder"
+
+        /**
+         * The tool definitions: fixed text, built once, identical in every request. Never put
+         * anything that can change (places, the time, the user's state) in here.
+         */
+        val DEFINITIONS: List<BetaTool> by lazy {
+            listOf(
+                tool(
+                    SET,
+                    "Set a reminder for the user. Give either `at` (a time) or `place` (arriving at a saved " +
+                        "place), not both. Ruby shows it as a notification then.",
+                    mapOf(
+                        "text" to mapOf(
+                            "type" to "string",
+                            "description" to "What to remind them of, short and in their words, e.g. \"Call Mom\".",
+                        ),
+                        "at" to mapOf(
+                            "type" to "string",
+                            "description" to "Local date and time in the phone's time zone, as YYYY-MM-DDTHH:MM, e.g. " +
+                                "2026-11-24T17:00. Work it out from the current time in the user's message.",
+                        ),
+                        "place" to mapOf(
+                            "type" to "string",
+                            "description" to "The name of one of the user's saved places, as listed in the " +
+                                "\"Saved places\" note on their newest message. Fires the next time they arrive there.",
+                        ),
+                    ),
+                    required = listOf("text"),
+                ),
+                tool(LIST, "List the reminders that haven't gone off yet, with their ids.", emptyMap(), required = emptyList()),
+                tool(
+                    CANCEL,
+                    "Cancel a reminder by id (from list_reminders), for example when the user no longer needs it.",
+                    mapOf("id" to mapOf("type" to "integer", "description" to "The reminder's id.")),
+                    required = listOf("id"),
+                ),
+            )
+        }
+
+        private fun tool(name: String, description: String, properties: Map<String, Any>, required: List<String>): BetaTool =
+            BetaTool.builder()
+                .name(name)
+                .description(description)
+                .inputSchema(
+                    BetaTool.InputSchema.builder()
+                        .properties(
+                            BetaTool.InputSchema.Properties.builder().apply {
+                                properties.forEach { (key, schema) -> putAdditionalProperty(key, JsonValue.from(schema)) }
+                            }.build()
+                        )
+                        .required(required)
+                        .build()
+                )
+                // Inputs stream as they're written; run() checks every field itself.
+                .eagerInputStreaming(true)
+                .build()
     }
 }
