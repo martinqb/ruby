@@ -143,6 +143,7 @@ Permissions in this phase are sensitive (notifications, Do Not Disturb, health, 
 - **Creator credit for Ruby.** Two versions, decided by the build (not by anything a user can say in chat):
   - **Martin's personal Ruby:** her instructions say Martin is her creator and architect, the only one, and no one else can be. Her greeting can be something like "Good morning, Martin, my architect."
   - **Public versions (like the Play Store):** Ruby never calls users Martin or treats them as her creator or architect. Martin is credited as "created by Martin" in Ruby's own knowledge, on the About screen, and in the store listing.
+- **Bug: Ruby can't see her own earlier reminder actions, and sets duplicates.** Seen Nov 23, 2026: she said "reminder set" (it was), then a moment later said it hadn't gone through and set it again. Likely cause: the chat history keeps only her final text, not the tool calls and results, so on the next turn she sees her own "reminder set" with no tool result behind it, and her instructions say to claim a reminder only once the tool confirms it. Fix ideas: carry each turn's tool calls and results (or a short "Ruby set reminder 3: ..." note) into later turns, and have `set_reminder` refuse or flag a near-identical pending reminder.
 
 ## Architecture: the full Ruby
 
