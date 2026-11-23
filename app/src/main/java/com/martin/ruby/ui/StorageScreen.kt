@@ -40,6 +40,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import com.martin.ruby.BuildConfig
 import com.martin.ruby.memory.ArchiveSummary
 import com.martin.ruby.memory.BudgetSetting
 import com.martin.ruby.memory.MemoryArchive
@@ -169,7 +170,8 @@ fun StorageScreen(store: MemoryStore, onBack: () -> Unit, modifier: Modifier = M
         }
 
         Spacer(Modifier.height(24.dp))
-        setting?.let { current ->
+        // Testing tools: debug builds only.
+        if (BuildConfig.DEBUG) setting?.let { current ->
             TestingSection(
                 current,
                 onSave = ::save,

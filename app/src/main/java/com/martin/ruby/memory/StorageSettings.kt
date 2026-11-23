@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.martin.ruby.BuildConfig
 import com.martin.ruby.data.dataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -74,6 +75,7 @@ class StorageSettings(private val context: Context) {
             ?: BudgetSetting.Mode.PERCENT,
         percent = prefs[Keys.PERCENT] ?: StorageBudget.DEFAULT_PERCENT,
         fixedBytes = prefs[Keys.FIXED] ?: 0L,
-        tinyTest = prefs[Keys.TINY] ?: false,
+        // The tiny limit can only be turned on in debug builds; a release build never uses it.
+        tinyTest = BuildConfig.DEBUG && prefs[Keys.TINY] == true,
     )
 }

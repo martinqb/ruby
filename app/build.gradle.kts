@@ -34,6 +34,8 @@ android {
     }
     buildFeatures {
         compose = true
+        // BuildConfig.DEBUG hides the storage limit's testing tools in release builds.
+        buildConfig = true
     }
 }
 
