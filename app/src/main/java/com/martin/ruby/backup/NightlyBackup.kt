@@ -19,6 +19,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.martin.ruby.MainActivity
 import com.martin.ruby.R
 import com.martin.ruby.drive.DriveAuth
@@ -67,7 +68,9 @@ object NightlyBackup {
 
     /** Runs the same job once, now, ignoring charging and Wi-Fi. For testing. */
     fun runTestNow(context: Context) {
-        val request = OneTimeWorkRequestBuilder<NightlyBackupWorker>().build()
+        val request = OneTimeWorkRequestBuilder<NightlyBackupWorker>()
+            .setInputData(workDataOf(NightlyBackupWorker.TEST_RUN to true)) // so the history says "test run"
+            .build()
         WorkManager.getInstance(context).enqueueUniqueWork(TEST_WORK_NAME, ExistingWorkPolicy.REPLACE, request)
     }
 
@@ -125,21 +128,27 @@ class NightlyBackupWorker(context: Context, params: WorkerParameters) : Coroutin
 
     override suspend fun doWork(): Result {
         val status = BackupStatusStore(applicationContext)
+        val history = BackupHistory(applicationContext)
+        val kind = if (inputData.getBoolean(TEST_RUN, false)) BackupRecord.Kind.NIGHTLY_TEST else BackupRecord.Kind.NIGHTLY
         val manager = BackupManager(applicationContext)
         if (!manager.isSetUp()) {
-            status.recordFailure("Backup isn't set up on this phone (no passphrase chosen).")
+            val why = "Backup isn't set up on this phone (no passphrase chosen)."
+            status.recordFailure(why)
+            history.failed(kind, why)
             return Result.success()
         }
         return try {
             // The phone may have filled up since memory last grew, so check the limit first.
             runCatching { MemoryLimit.enforce(applicationContext) }
             val token = DriveAuth.silentToken(applicationContext)
-            DriveBackup(applicationContext, manager).backUp(token) // records the success
+            val uploaded = DriveBackup(applicationContext, manager).backUp(token) // records the status
+            history.succeeded(kind, uploaded.messageCount, uploaded.file.sizeBytes)
             NightlyBackup.clearApprovalNotice(applicationContext)
             Result.success()
         } catch (e: DriveAuth.NeedsApproval) {
             // Trying again won't help until the user approves, so wait for them.
             status.recordNeedsApproval()
+            history.failed(kind, "Google Drive access needs approving again (open Backup and tap Approve).")
             SensingLog.add("Nightly backup paused: Google Drive access needs approving again.")
             NightlyBackup.showApprovalNotice(applicationContext)
             Result.success()
@@ -148,12 +157,17 @@ class NightlyBackupWorker(context: Context, params: WorkerParameters) : Coroutin
         } catch (e: Exception) {
             val why = e.message ?: e.javaClass.simpleName
             status.recordFailure(why)
+            val tries = if (runAttemptCount + 1 < MAX_TRIES) " Will try again." else ""
+            history.failed(kind, "$why (try ${runAttemptCount + 1} of $MAX_TRIES).$tries")
             SensingLog.add("Nightly backup failed (try ${runAttemptCount + 1} of $MAX_TRIES): $why")
             if (runAttemptCount + 1 < MAX_TRIES) Result.retry() else Result.success()
         }
     }
 
-    private companion object {
-        const val MAX_TRIES = 3
+    companion object {
+        private const val MAX_TRIES = 3
+
+        /** Input flag: started by "Test now" rather than the nightly schedule. */
+        const val TEST_RUN = "test_run"
     }
 }

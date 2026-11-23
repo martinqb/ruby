@@ -58,6 +58,9 @@ import com.martin.ruby.backup.BackupCrypto
 import com.martin.ruby.backup.BackupManager
 import com.martin.ruby.backup.BackupStatus
 import com.martin.ruby.backup.BackupStatusStore
+import com.martin.ruby.backup.BackupHistory
+import com.martin.ruby.backup.BackupRecord
+import kotlinx.coroutines.CancellationException
 import com.martin.ruby.backup.NightlyBackup
 import com.martin.ruby.backup.backupFileName
 import com.martin.ruby.drive.DriveAuth
@@ -86,6 +89,8 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
     val drive = remember(manager) { DriveBackup(context, manager) }
     val statusStore = remember { BackupStatusStore(context) }
     val status by statusStore.status.collectAsState(initial = BackupStatus())
+    val history = remember { BackupHistory(context) }
+    val records by history.records.collectAsState(initial = emptyList())
     /** The backups in Drive, once listed. */
     var driveFiles by remember { mutableStateOf<List<DriveFile>?>(null) }
 
@@ -101,22 +106,19 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
 
     LaunchedEffect(manager) { setUp = manager.isSetUp() }
 
-    fun run(what: String, block: suspend () -> Unit) {
+    /** Runs [block], showing [what] meanwhile. If it fails, the reason is shown and passed to [onFail]. */
+    fun run(what: String, onFail: (suspend (String) -> Unit)? = null, block: suspend () -> Unit) {
         busy = what
         message = null
         scope.launch {
             try {
                 block()
-            } catch (e: BackupCrypto.CantOpen) {
-                message = e.message
-            } catch (e: DriveAuth.Failed) {
-                message = e.message
-            } catch (e: DriveClient.Error) {
-                message = e.message
-            } catch (e: java.io.IOException) {
-                message = "Couldn't reach Google Drive: ${e.message ?: "check the internet connection"}."
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                message = "Something went wrong: ${e.message ?: e.javaClass.simpleName}"
+                val why = failureText(e)
+                message = why
+                onFail?.invoke(why)
             } finally {
                 busy = null
             }
@@ -127,9 +129,10 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        run("Making the backup…") {
+        run("Making the backup…", onFail = { history.failed(BackupRecord.Kind.MANUAL_FILE, it) }) {
             val backup = manager.makeBackup()
             writeFile(context, uri, backup.bytes)
+            history.succeeded(BackupRecord.Kind.MANUAL_FILE, backup.messageCount, backup.bytes.size.toLong())
             message = "Backup saved: ${backup.messageCount} messages, ${sizeLabel(backup.bytes.size)}, " +
                 "encrypted. Keep a copy off this phone."
         }
@@ -138,26 +141,31 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
     // Google Drive: get a token (asking the user the first time), then run the action.
     var afterConsent by remember { mutableStateOf<(suspend (String) -> Unit)?>(null) }
     var afterConsentLabel by remember { mutableStateOf("") }
+    var afterConsentFail by remember { mutableStateOf<(suspend (String) -> Unit)?>(null) }
     val consentLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         val action = afterConsent
         afterConsent = null
         if (action == null) return@rememberLauncherForActivityResult
+        val onFail = afterConsentFail
+        afterConsentFail = null
         if (result.resultCode != Activity.RESULT_OK) {
             message = "Google Drive access wasn't allowed."
+            onFail?.let { scope.launch { it("Google Drive access wasn't allowed.") } }
             return@rememberLauncherForActivityResult
         }
-        run(afterConsentLabel) { action(DriveAuth.tokenFromIntent(context, result.data)) }
+        run(afterConsentLabel, onFail) { action(DriveAuth.tokenFromIntent(context, result.data)) }
     }
 
-    fun withDrive(what: String, action: suspend (token: String) -> Unit) {
-        run(what) {
+    fun withDrive(what: String, onFail: (suspend (String) -> Unit)? = null, action: suspend (token: String) -> Unit) {
+        run(what, onFail) {
             when (val auth = DriveAuth.authorize(context)) {
                 is DriveAuth.Result.Token -> action(auth.accessToken)
                 is DriveAuth.Result.NeedsConsent -> {
                     afterConsent = action
                     afterConsentLabel = what
+                    afterConsentFail = onFail
                     consentLauncher.launch(IntentSenderRequest.Builder(auth.pendingIntent).build())
                 }
             }
@@ -263,8 +271,12 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
                 Row {
                     Button(
                         onClick = {
-                            withDrive("Backing up to Google Drive…") { token ->
+                            withDrive(
+                                "Backing up to Google Drive…",
+                                onFail = { history.failed(BackupRecord.Kind.MANUAL_DRIVE, it) },
+                            ) { token ->
                                 val uploaded = drive.backUp(token)
+                                history.succeeded(BackupRecord.Kind.MANUAL_DRIVE, uploaded.messageCount, uploaded.file.sizeBytes)
                                 if (driveFiles != null) driveFiles = drive.list(token)
                                 message = "Backed up to Google Drive: ${uploaded.messageCount} messages, " +
                                     sizeLabel(uploaded.file.sizeBytes.toInt()) + "." +
@@ -392,7 +404,54 @@ fun BackupScreen(manager: BackupManager, onBack: () -> Unit, modifier: Modifier 
             Spacer(Modifier.height(16.dp))
             Text(it, style = MaterialTheme.typography.bodyMedium)
         }
+
+        Spacer(Modifier.height(24.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+        HistorySection(records)
     }
+}
+
+/** The last [BackupHistory.KEEP] backups, newest first. */
+@Composable
+private fun HistorySection(records: List<BackupRecord>) {
+    Text("Backup history", style = MaterialTheme.typography.titleMedium)
+    Text(
+        "The last ${BackupHistory.KEEP} backups, newest first.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(8.dp))
+    if (records.isEmpty()) {
+        Text(
+            "No backups recorded yet. Backups made before this update aren't listed.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        return
+    }
+    val format = remember { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT) }
+    records.forEach { r ->
+        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            Text(
+                "${format.format(Date(r.timeMillis))} · ${r.kind.label}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                if (r.succeeded) "Succeeded: ${r.detail}" else "Failed: ${r.detail}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (r.succeeded) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error,
+            )
+        }
+        HorizontalDivider()
+    }
+}
+
+/** The message shown (and kept in the history) when a backup action fails. */
+private fun failureText(e: Exception): String = when (e) {
+    is BackupCrypto.CantOpen, is DriveAuth.Failed, is DriveClient.Error -> e.message ?: e.javaClass.simpleName
+    is java.io.IOException -> "Couldn't reach Google Drive: ${e.message ?: "check the internet connection"}."
+    else -> "Something went wrong: ${e.message ?: e.javaClass.simpleName}"
 }
 
 /** "Google needs you to approve again": why backups stopped, and the button that fixes it. */
