@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -22,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.martin.ruby.backup.BackupManager
@@ -52,6 +54,7 @@ import com.martin.ruby.ui.PlacesScreen
 import com.martin.ruby.ui.ExportScreen
 import com.martin.ruby.ui.StorageScreen
 import com.martin.ruby.ui.theme.RubyTheme
+import com.martin.ruby.voice.VoiceSession
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -70,6 +73,7 @@ class MainActivity : ComponentActivity() {
     private var hasActivityPermission by mutableStateOf(false)
     private var hasLocationPermission by mutableStateOf(false)
     private var hasBackgroundLocation by mutableStateOf(false)
+    private var hasMicPermission by mutableStateOf(false)
     private var gpsEnabled by mutableStateOf(true)
     private var batteryOptimized by mutableStateOf(false)
     private var savingPlace by mutableStateOf(false)
@@ -80,6 +84,13 @@ class MainActivity : ComponentActivity() {
 
     /** Set when the "memory is full" notification asks for the Storage screen. */
     private var openStorageRequested by mutableStateOf(false)
+
+    /** Asked the first time the user taps Talk; if they allow it, Ruby starts listening. */
+    private val micLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            hasMicPermission = granted
+            if (granted) listen()
+        }
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -96,6 +107,7 @@ class MainActivity : ComponentActivity() {
         openStorageRequested = intent?.getBooleanExtra(EXTRA_OPEN_STORAGE, false) == true
         checkPermissions()
         ChatSession.checkKey(applicationContext)
+        VoiceSession.start(applicationContext)
 
         // Android's own backup can bring "nightly is on" to a new phone without the
         // scheduled job, so make sure it's scheduled. Scheduling again changes nothing.
@@ -123,6 +135,7 @@ class MainActivity : ComponentActivity() {
                 val places by placeStore.places.collectAsState(initial = emptyList())
                 val log by SensingLog.entries.collectAsState()
                 val chat by ChatSession.ui.collectAsState()
+                val voice by VoiceSession.ui.collectAsState()
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
                 if (openStorageRequested) {
                     openStorageRequested = false
@@ -159,6 +172,8 @@ class MainActivity : ComponentActivity() {
 
                         Screen.CHAT -> ChatScreen(
                             ui = chat,
+                            voice = voice,
+                            hasMicPermission = hasMicPermission,
                             context = context?.state?.label,
                             actions = ChatActions(
                                 onSend = { text -> ChatSession.send(applicationContext, text) },
@@ -166,6 +181,17 @@ class MainActivity : ComponentActivity() {
                                 onForgetKey = { ChatSession.forgetKey(applicationContext) },
                                 onNewConversation = ChatSession::newConversation,
                                 onDismissError = ChatSession::dismissError,
+                                onTalk = ::listen,
+                                onAllowMic = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                                onDoneTalking = VoiceSession::finishListening,
+                                onCancelTalking = VoiceSession::cancelListening,
+                                onDismissNote = VoiceSession::dismissNote,
+                                onPlay = VoiceSession::play,
+                                onStopSpeaking = VoiceSession::stopSpeaking,
+                                onSaveVoice = { prefs -> VoiceSession.save(applicationContext, prefs) },
+                                onTestVoice = {
+                                    VoiceSession.play("Hello. I'm Ruby. This is how I sound right now.")
+                                },
                                 onBack = { screen = Screen.MAIN },
                             ),
                             modifier = modifier,
@@ -272,6 +298,13 @@ class MainActivity : ComponentActivity() {
         hasBackgroundLocation = GpsReader.hasBackgroundLocation(this)
         gpsEnabled = GpsReader(this).isGpsOn()
         batteryOptimized = BackgroundSensing.isBatteryOptimized(this)
+        hasMicPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
+    /** Listens once, and sends what the user said; the reply may then be read aloud. */
+    private fun listen() {
+        VoiceSession.listen { heard -> ChatSession.send(applicationContext, heard, spoken = true) }
     }
 
     private fun onPermissionsChanged() {

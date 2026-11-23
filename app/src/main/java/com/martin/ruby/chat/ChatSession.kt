@@ -7,6 +7,7 @@ import com.martin.ruby.log.SensingLog
 import com.martin.ruby.memory.MemoryMessage
 import com.martin.ruby.memory.MemoryRecall
 import com.martin.ruby.memory.MemoryStore
+import com.martin.ruby.voice.VoiceSession
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -85,12 +86,16 @@ object ChatSession {
 
     fun dismissError() = _ui.update { it.copy(error = null) }
 
-    /** Sends [text]; returns false (and does nothing) if a reply is still coming. */
-    fun send(context: Context, text: String): Boolean {
+    /**
+     * Sends [text]; returns false (and does nothing) if a reply is still coming. [spoken]
+     * means the user said it rather than typed it, so the reply may be read aloud.
+     */
+    fun send(context: Context, text: String, spoken: Boolean = false): Boolean {
         val message = text.trim()
         if (message.isEmpty() || _ui.value.sending) return false
         val appContext = context.applicationContext
         val label = currentContextLabel()
+        val speak = VoiceSession.shouldSpeak(spoken)
         _ui.update {
             it.copy(turns = it.turns + ChatTurn(fromUser = true, text = message), sending = true, replying = "", error = null)
         }
@@ -108,20 +113,25 @@ object ChatSession {
             )
             _ui.update { it.copy(turns = it.turns.dropLast(1) + turn) }
             val history = _ui.value.turns
+            VoiceSession.replyStarted(speak)
             try {
                 val client = client(appContext)
                 val reply = withContext(Dispatchers.IO) {
                     client.reply(history.takeLast(MAX_TURNS_SENT).dropWhile { !it.fromUser }) { soFar ->
                         _ui.update { it.copy(replying = soFar) }
+                        VoiceSession.replyProgress(soFar)
                     }
                 }
+                VoiceSession.replyFinished()
                 _ui.update { it.copy(turns = it.turns + ChatTurn(fromUser = false, text = reply)) }
                 saveToMemory(memory, MemoryMessage.ROLE_RUBY, reply)
             } catch (e: ClaudeChat.ChatError) {
                 SensingLog.add("Chat: ${e.message}")
+                VoiceSession.replyFailed(e.message ?: "I couldn't answer.")
                 _ui.update { it.copy(error = e.message) }
             } catch (e: Exception) {
                 SensingLog.add("Chat failed: ${e.javaClass.simpleName}: ${e.message}")
+                VoiceSession.replyFailed("Something went wrong.")
                 _ui.update { it.copy(error = "Something went wrong: ${e.message ?: e.javaClass.simpleName}") }
             } finally {
                 _ui.update { it.copy(sending = false, replying = null) }

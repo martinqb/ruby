@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,33 +12,43 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.martin.ruby.chat.ApiKeyStore
 import com.martin.ruby.chat.ChatTurn
 import com.martin.ruby.chat.ChatUi
+import com.martin.ruby.voice.SpeakMode
+import com.martin.ruby.voice.VoicePrefs
+import com.martin.ruby.voice.VoiceStyle
+import com.martin.ruby.voice.VoiceUi
 
 /** Everything the user can do on the chat screen. */
 data class ChatActions(
@@ -46,23 +57,46 @@ data class ChatActions(
     val onForgetKey: () -> Unit = {},
     val onNewConversation: () -> Unit = {},
     val onDismissError: () -> Unit = {},
+    /** Start listening (the microphone permission is already granted). */
+    val onTalk: () -> Unit = {},
+    /** Ask Android for the microphone permission, then start listening if granted. */
+    val onAllowMic: () -> Unit = {},
+    val onDoneTalking: () -> Unit = {},
+    val onCancelTalking: () -> Unit = {},
+    val onDismissNote: () -> Unit = {},
+    val onPlay: (String) -> Unit = {},
+    val onStopSpeaking: () -> Unit = {},
+    val onSaveVoice: (VoicePrefs) -> Unit = {},
+    val onTestVoice: () -> Unit = {},
     val onBack: () -> Unit = {},
 )
 
-/** Chatting with Claude, as Ruby. Asks for an API key first if there isn't one. */
+/** Chatting with Claude, as Ruby, by typing or talking. Asks for an API key first if there isn't one. */
 @Composable
-fun ChatScreen(ui: ChatUi, context: String?, actions: ChatActions, modifier: Modifier = Modifier) {
+fun ChatScreen(
+    ui: ChatUi,
+    voice: VoiceUi,
+    hasMicPermission: Boolean,
+    context: String?,
+    actions: ChatActions,
+    modifier: Modifier = Modifier,
+) {
     var changingKey by rememberSaveable { mutableStateOf(false) }
+    var showVoice by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize().imePadding().padding(16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(verticalAlignment = Alignment.Top) {
             TextButton(onClick = actions.onBack) { Text("Back") }
-            Spacer(Modifier.weight(1f))
-            if (ui.hasKey == true && !changingKey) {
-                TextButton(onClick = actions.onNewConversation, enabled = !ui.sending && ui.turns.isNotEmpty()) {
-                    Text("New chat")
+            // Wraps onto a second line on narrow phones.
+            FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
+                if (voice.speaking) TextButton(onClick = actions.onStopSpeaking) { Text("Stop talking") }
+                if (ui.hasKey == true && !changingKey) {
+                    TextButton(onClick = actions.onNewConversation, enabled = !ui.sending && ui.turns.isNotEmpty()) {
+                        Text("New chat")
+                    }
+                    TextButton(onClick = { showVoice = true }) { Text("Voice") }
+                    TextButton(onClick = { changingKey = true }) { Text("Change key") }
                 }
-                TextButton(onClick = { changingKey = true }) { Text("Change key") }
             }
         }
         Text("Chat with Ruby", style = MaterialTheme.typography.headlineSmall)
@@ -81,7 +115,7 @@ fun ChatScreen(ui: ChatUi, context: String?, actions: ChatActions, modifier: Mod
                 },
                 onCancel = { changingKey = false },
             )
-            else -> Conversation(ui, context, actions, Modifier.weight(1f))
+            else -> Conversation(ui, voice, hasMicPermission, context, actions, Modifier.weight(1f))
         }
     }
 
@@ -93,11 +127,28 @@ fun ChatScreen(ui: ChatUi, context: String?, actions: ChatActions, modifier: Mod
             confirmButton = { TextButton(onClick = actions.onDismissError) { Text("OK") } },
         )
     }
+
+    if (showVoice) {
+        VoiceDialog(
+            voice = voice,
+            onSave = actions.onSaveVoice,
+            onTest = actions.onTestVoice,
+            onClose = { showVoice = false },
+        )
+    }
 }
 
 @Composable
-private fun Conversation(ui: ChatUi, context: String?, actions: ChatActions, modifier: Modifier) {
+private fun Conversation(
+    ui: ChatUi,
+    voice: VoiceUi,
+    hasMicPermission: Boolean,
+    context: String?,
+    actions: ChatActions,
+    modifier: Modifier,
+) {
     var draft by rememberSaveable { mutableStateOf("") }
+    var explainMic by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val itemCount = ui.turns.size + if (ui.replying != null) 1 else 0
 
@@ -118,38 +169,110 @@ private fun Conversation(ui: ChatUi, context: String?, actions: ChatActions, mod
     Box(modifier.fillMaxWidth()) {
         if (itemCount == 0) {
             Text(
-                "Ask Ruby anything. Messages and replies are saved to memory.",
+                "Ask Ruby anything: type, or tap Talk. Messages and replies are saved to memory.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            itemsIndexed(ui.turns) { _, turn -> Bubble(turn) }
+            itemsIndexed(ui.turns) { _, turn -> Bubble(turn, onPlay = actions.onPlay) }
             ui.replying?.let { soFar ->
-                item { Bubble(ChatTurn(fromUser = false, text = soFar.ifEmpty { "…" })) }
+                item { Bubble(ChatTurn(fromUser = false, text = soFar.ifEmpty { "…" }), onPlay = null) }
             }
         }
     }
 
     Spacer(Modifier.height(8.dp))
+    if (voice.listening) {
+        Listening(voice, actions)
+        return
+    }
+    voice.note?.let { note ->
+        Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        Spacer(Modifier.height(4.dp))
+    }
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = draft,
-            onValueChange = { draft = it },
+            onValueChange = {
+                draft = it
+                if (voice.note != null) actions.onDismissNote()
+            },
             label = { Text("Message") },
             maxLines = 5,
             modifier = Modifier.weight(1f),
         )
         Spacer(Modifier.width(8.dp))
-        Button(
-            onClick = { if (actions.onSend(draft)) draft = "" },
-            enabled = draft.isNotBlank() && !ui.sending,
-        ) { Text(if (ui.sending) "…" else "Send") }
+        // One button: Talk when there's nothing typed, Send when there is.
+        if (draft.isBlank() && voice.canListen) {
+            Button(
+                onClick = { if (hasMicPermission) actions.onTalk() else explainMic = true },
+                enabled = !ui.sending,
+            ) { Text("Talk") }
+        } else {
+            Button(
+                onClick = { if (actions.onSend(draft)) draft = "" },
+                enabled = draft.isNotBlank() && !ui.sending,
+            ) { Text(if (ui.sending) "…" else "Send") }
+        }
+    }
+
+    if (explainMic) {
+        AlertDialog(
+            onDismissRequest = { explainMic = false },
+            title = { Text("Talk to Ruby") },
+            text = {
+                Text(
+                    "Ruby needs the microphone to hear you. She only listens after you tap Talk, " +
+                        "until you stop speaking."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    explainMic = false
+                    actions.onAllowMic()
+                }) { Text("Allow microphone") }
+            },
+            dismissButton = { TextButton(onClick = { explainMic = false }) { Text("Not now") } },
+        )
     }
 }
 
 @Composable
-private fun Bubble(turn: ChatTurn) {
+private fun Listening(voice: VoiceUi, actions: ChatActions) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.secondaryContainer, RoundedCornerShape(16.dp))
+            .padding(14.dp)
+    ) {
+        Text(
+            "Listening…",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+        Text(
+            voice.heard.ifEmpty { "Go ahead." },
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+        Text(
+            if (voice.listensOnDevice) "Your voice is turned into text on this phone."
+            else "This phone's speech service turns your voice into text; it may send the audio to its maker.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row {
+            Button(onClick = actions.onDoneTalking) { Text("Done") }
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = actions.onCancelTalking) { Text("Cancel") }
+        }
+    }
+}
+
+@Composable
+private fun Bubble(turn: ChatTurn, onPlay: ((String) -> Unit)?) {
     val colors = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (turn.fromUser) Alignment.End else Alignment.Start) {
         SelectionContainer {
@@ -174,7 +297,70 @@ private fun Bubble(turn: ChatTurn) {
                 modifier = Modifier.padding(top = 2.dp, end = 4.dp),
             )
         }
+        if (!turn.fromUser && onPlay != null) {
+            TextButton(onClick = { onPlay(turn.text) }) { Text("Play") }
+        }
     }
+}
+
+/** When Ruby speaks, and how she sounds. */
+@Composable
+private fun VoiceDialog(voice: VoiceUi, onSave: (VoicePrefs) -> Unit, onTest: () -> Unit, onClose: () -> Unit) {
+    val prefs = voice.prefs
+    var speed by remember { mutableFloatStateOf(prefs.style.speed) }
+    var pitch by remember { mutableFloatStateOf(prefs.style.pitch) }
+
+    fun saveStyle() = onSave(prefs.copy(style = VoiceStyle(speed = speed, pitch = pitch)))
+
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Ruby's voice") },
+        text = {
+            Column {
+                Text("Read replies aloud", style = MaterialTheme.typography.titleSmall)
+                SpeakMode.entries.forEach { mode ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .selectable(selected = prefs.mode == mode, role = Role.RadioButton) {
+                                onSave(prefs.copy(mode = mode))
+                            }
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        RadioButton(selected = prefs.mode == mode, onClick = null)
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(mode.label, style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                mode.explained,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("Speed: %.1f×".format(speed), style = MaterialTheme.typography.titleSmall)
+                Slider(value = speed, onValueChange = { speed = it }, onValueChangeFinished = ::saveStyle, valueRange = 0.5f..2.0f)
+                Text("Pitch: %.1f×".format(pitch), style = MaterialTheme.typography.titleSmall)
+                Slider(value = pitch, onValueChange = { pitch = it }, onValueChangeFinished = ::saveStyle, valueRange = 0.5f..1.5f)
+                Text(
+                    "Voice: ${prefs.engine.label}. The sound itself comes from the phone's text-to-speech " +
+                        "settings; a custom voice can be added later.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                voice.problem?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = onTest) { Text("Test voice") }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Done") } },
+    )
 }
 
 @Composable

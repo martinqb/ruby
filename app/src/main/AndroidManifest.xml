@@ -34,6 +34,20 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
+    <!-- Voice: hearing the user when they tap Talk. Asked for the first time they do. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Voice: Android 11+ only lets Ruby find the speech recognizer and text-to-speech
+         engine if it says it's looking for them. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
