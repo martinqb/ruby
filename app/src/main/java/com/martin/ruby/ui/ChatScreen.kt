@@ -108,7 +108,8 @@ private fun Conversation(ui: ChatUi, context: String?, actions: ChatActions, mod
 
     Text(
         "Each message goes to Anthropic's Claude along with what Ruby senses you're doing" +
-            (if (context != null) " (now: $context)" else "") + ". Nothing else from the phone's sensors is sent.",
+            (if (context != null) " (now: $context)" else "") + " and a few related past messages " +
+            "from memory. Nothing else from the phone's sensors is sent.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -150,7 +151,7 @@ private fun Conversation(ui: ChatUi, context: String?, actions: ChatActions, mod
 @Composable
 private fun Bubble(turn: ChatTurn) {
     val colors = MaterialTheme.colorScheme
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (turn.fromUser) Arrangement.End else Arrangement.Start) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (turn.fromUser) Alignment.End else Alignment.Start) {
         SelectionContainer {
             Text(
                 turn.text,
@@ -163,6 +164,14 @@ private fun Bubble(turn: ChatTurn) {
                         RoundedCornerShape(16.dp),
                     )
                     .padding(horizontal = 14.dp, vertical = 10.dp),
+            )
+        }
+        if (turn.memoriesUsed > 0) {
+            Text(
+                if (turn.memoriesUsed == 1) "Used 1 memory" else "Used ${turn.memoriesUsed} memories",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp, end = 4.dp),
             )
         }
     }

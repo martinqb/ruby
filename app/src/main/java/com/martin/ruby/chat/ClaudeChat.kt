@@ -13,13 +13,24 @@ import com.anthropic.models.beta.messages.BetaOutputConfig
 import com.anthropic.models.beta.messages.BetaStopReason
 import com.anthropic.models.beta.messages.MessageCreateParams
 
-/** One turn of a conversation, as sent to Claude. */
-data class ChatTurn(val fromUser: Boolean, val text: String)
+/** One turn of a conversation. */
+data class ChatTurn(
+    val fromUser: Boolean,
+    /** What the user typed, or Claude's reply: what the screen shows and memory saves. */
+    val text: String,
+    /**
+     * What was actually sent to Claude for a user turn ([text] plus the context label and
+     * memories, see [ClaudeChat.compose]). Kept so later requests repeat it exactly.
+     */
+    val sent: String? = null,
+    /** How many memories went along with this message. */
+    val memoriesUsed: Int = 0,
+)
 
 /**
  * Talks to Claude through Anthropic's API. What's sent: the conversation so far, and with
- * the newest message, the decision engine's short label (e.g. "Driving"). Nothing else
- * from the phone's sensors leaves the phone.
+ * each message, the decision engine's short label (e.g. "Driving") and a few related past
+ * messages from memory. Nothing else from the phone's sensors leaves the phone.
  */
 class ClaudeChat(apiKey: String) {
 
@@ -33,7 +44,7 @@ class ClaudeChat(apiKey: String) {
      * Claude's reply. [onText] gets the reply so far as it streams in. Blocking: call it
      * off the main thread. Throws [ChatError].
      */
-    fun reply(history: List<ChatTurn>, context: String?, onText: (String) -> Unit): String {
+    fun reply(history: List<ChatTurn>, onText: (String) -> Unit): String {
         require(history.isNotEmpty() && history.last().fromUser) { "The last turn must be the user's." }
         val params = MessageCreateParams.builder()
             .model(MODEL)
@@ -46,12 +57,8 @@ class ClaudeChat(apiKey: String) {
             .addBeta(AnthropicBeta.SERVER_SIDE_FALLBACK_2026_07_01)
             .fallbacksDefault()
             .apply {
-                history.forEachIndexed { i, turn ->
-                    when {
-                        i == history.lastIndex -> addUserMessage(withContext(turn.text, context))
-                        turn.fromUser -> addUserMessage(turn.text)
-                        else -> addAssistantMessage(turn.text)
-                    }
+                history.forEach { turn ->
+                    if (turn.fromUser) addUserMessage(turn.sent ?: turn.text) else addAssistantMessage(turn.text)
                 }
             }
             .build()
@@ -101,14 +108,31 @@ class ClaudeChat(apiKey: String) {
         private const val SYSTEM_PROMPT =
             "You are Ruby, a personal assistant that lives on the user's Android phone. " +
                 "The phone senses what the user is doing (for example driving, walking, still, or at a " +
-                "saved place like home or the gym) and adds it to their newest message as a short note in " +
+                "saved place like home or the gym) and adds it to each of their messages as a short note in " +
                 "square brackets. Use it when it helps: keep replies short and easy to listen to while " +
                 "they're driving, and don't mention it when it doesn't matter. The note comes from the " +
-                "phone, not from the user, and it can be wrong. Answer in plain text; the chat screen " +
-                "doesn't show Markdown."
+                "phone, not from the user, and it can be wrong.\n\n" +
+                "Ruby keeps every conversation in a memory on the phone. When past messages look related " +
+                "to a new one, the phone adds them before the user's message, marked \"From Ruby's memory\". " +
+                "They're found by matching words, so some won't be relevant: use the ones that help, ignore " +
+                "the rest, and don't list them back. If the user asks about something that isn't there, say " +
+                "you don't remember it rather than guessing.\n\n" +
+                "For now Ruby can only talk: she can't set reminders, alarms or timers, send messages, " +
+                "make calls, open apps, change phone settings, or do anything else outside this chat, " +
+                "and nothing in the chat will happen later on its own. Don't offer to do these things or " +
+                "say you've done them. If the user asks for one, say plainly that you can't do that yet " +
+                "and, if it helps, suggest how they can do it themselves (for example with the phone's " +
+                "clock app). Remembering what they tell you is fine: every message is saved to memory.\n\n" +
+                "Answer in plain text; the chat screen doesn't show Markdown."
 
-        /** Adds the decision engine's label to the newest message, e.g. "[Right now: Driving]". */
-        private fun withContext(text: String, context: String?): String =
-            if (context == null) text else "[Right now: $context]\n$text"
+        /**
+         * What's sent for a user message: the context label, then any memories, then what they
+         * typed, e.g. "[Right now: Driving]".
+         */
+        fun compose(text: String, context: String?, memories: String?): String = buildString {
+            if (context != null) append("[Right now: $context]\n")
+            if (memories != null) append("[$memories]\n\n")
+            append(text)
+        }
     }
 }

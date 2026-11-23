@@ -100,6 +100,10 @@ interface MemoryDao {
     /** Full-text search; build the query with [MemoryDatabase.searchQuery]. */
     @RawQuery(observedEntities = [MemoryMessage::class])
     fun search(query: SupportSQLiteQuery): Flow<List<MemoryMessage>>
+
+    /** A one-off full-text search; build the query with [MemoryDatabase.recallQuery]. */
+    @RawQuery
+    suspend fun searchNow(query: SupportSQLiteQuery): List<MemoryMessage>
 }
 
 /**
@@ -225,6 +229,22 @@ abstract class MemoryDatabase : RoomDatabase() {
             SELECT messages.* FROM messages
             JOIN messages_fts ON messages.id = messages_fts.rowid
             WHERE messages_fts MATCH ?
+            ORDER BY bm25(messages_fts)
+            LIMIT $limit
+            """.trimIndent(),
+            arrayOf(fts),
+        )
+
+        /**
+         * For chat recall: the best [limit] matches for [MemoryRecall.ftsQuery] output,
+         * leaving out the storage limit's test notes.
+         */
+        fun recallQuery(fts: String, limit: Int): SupportSQLiteQuery = SimpleSQLiteQuery(
+            """
+            SELECT messages.* FROM messages
+            JOIN messages_fts ON messages.id = messages_fts.rowid
+            WHERE messages_fts MATCH ?
+            AND NOT (IFNULL(messages.context, '') = 'Test' AND messages.text LIKE 'Test note %')
             ORDER BY bm25(messages_fts)
             LIMIT $limit
             """.trimIndent(),

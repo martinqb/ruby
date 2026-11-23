@@ -87,7 +87,7 @@ Only change the state after it holds for 30 to 60 seconds, so a stoplight doesn'
 6. **Storage limit.** Give local memory a storage budget, by default about 5% of the phone's total storage, which the user can change in settings to another percentage or a fixed amount in GB or TB. Ruby never fills the drive and always leaves free space for the phone. She warns at about 80% of her budget. At the limit she never deletes memories: she compresses them or moves the oldest ones to the encrypted Google Drive backup, and pulls them back down when asked.
 7. **Restore and control.** Add a restore screen for a new phone, plus view, export and delete buttons so users can see and manage everything stored.
 
-**Status (Nov 23, 2026):** the storage limit (step 6) and export (step 7) are done. Ruby can now chat with Claude (Opus 5.5, through the user's own API key, saved encrypted on the phone): each message goes with the current context label, and messages and replies are saved to memory. Next: sending relevant memories along (step 3) and summarizing old chats (step 4).
+**Status (Nov 23, 2026):** the storage limit (step 6) and export (step 7) are done. Ruby can now chat with Claude (Opus 5.5, through the user's own API key, saved encrypted on the phone): each message goes with the current context label, and messages and replies are saved to memory. Sending relevant memories along (step 3) is done with keyword search: each message takes up to 5 related past messages. Ruby can't take actions yet (reminders, messages and so on), and her instructions say so. Next: summarizing old chats (step 4).
 
 **Test:** chat for a few days, wipe the app, restore from backup, and ask about something from day one.
 

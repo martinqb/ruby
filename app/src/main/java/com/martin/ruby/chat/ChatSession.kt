@@ -5,6 +5,7 @@ import android.os.SystemClock
 import com.martin.ruby.decision.ContextStatus
 import com.martin.ruby.log.SensingLog
 import com.martin.ruby.memory.MemoryMessage
+import com.martin.ruby.memory.MemoryRecall
 import com.martin.ruby.memory.MemoryStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,8 +35,8 @@ data class ChatUi(
  * screen (or the screen rotating) doesn't lose it or cut off a reply. Every message and
  * reply is also saved to memory.
  *
- * A new conversation starts each time the app starts. Bringing older memories into the
- * conversation comes with Phase 6 step 3.
+ * A new conversation starts each time the app starts. Each message takes along a few
+ * related messages from earlier conversations ([MemoryRecall]).
  */
 object ChatSession {
 
@@ -72,9 +73,13 @@ object ChatSession {
         }
     }
 
-    /** Starts a fresh conversation. Memory keeps the old one. */
+    /** Memory ids of this conversation's messages, which recall leaves out (they're sent anyway). */
+    private val conversationIds = mutableSetOf<Long>()
+
+    /** Starts a fresh conversation. Memory keeps the old one, and can recall it from now on. */
     fun newConversation() {
         if (_ui.value.sending) return
+        conversationIds.clear()
         _ui.update { it.copy(turns = emptyList(), error = null) }
     }
 
@@ -86,16 +91,27 @@ object ChatSession {
         if (message.isEmpty() || _ui.value.sending) return false
         val appContext = context.applicationContext
         val label = currentContextLabel()
-        val sent = _ui.value.turns + ChatTurn(fromUser = true, text = message)
-        _ui.update { it.copy(turns = sent, sending = true, replying = "", error = null) }
+        _ui.update {
+            it.copy(turns = it.turns + ChatTurn(fromUser = true, text = message), sending = true, replying = "", error = null)
+        }
 
         scope.launch {
             val memory = MemoryStore(appContext)
+            // Look before saving the new message, so it doesn't find itself.
+            val memories = recall(memory, message)
             saveToMemory(memory, MemoryMessage.ROLE_USER, message)
+            val turn = ChatTurn(
+                fromUser = true,
+                text = message,
+                sent = ClaudeChat.compose(message, label, MemoryRecall.format(memories)),
+                memoriesUsed = memories.size,
+            )
+            _ui.update { it.copy(turns = it.turns.dropLast(1) + turn) }
+            val history = _ui.value.turns
             try {
                 val client = client(appContext)
                 val reply = withContext(Dispatchers.IO) {
-                    client.reply(sent.takeLast(MAX_TURNS_SENT).dropWhile { !it.fromUser }, label) { soFar ->
+                    client.reply(history.takeLast(MAX_TURNS_SENT).dropWhile { !it.fromUser }) { soFar ->
                         _ui.update { it.copy(replying = soFar) }
                     }
                 }
@@ -121,9 +137,19 @@ object ChatSession {
     private fun currentContextLabel(): String? =
         (ContextStatus.strongestRecent(SystemClock.elapsedRealtime()) ?: ContextStatus.reading.value?.state)?.label
 
+    /** Related past messages, or none if memory can't be searched (the chat still works). */
+    private suspend fun recall(memory: MemoryStore, message: String): List<MemoryMessage> = try {
+        memory.recall(message, exclude = conversationIds.toSet()).also {
+            if (it.isNotEmpty()) SensingLog.add("Chat: sending ${it.size} related memories along.")
+        }
+    } catch (e: Exception) {
+        SensingLog.add("Couldn't search memory for the chat: ${e.message}")
+        emptyList()
+    }
+
     private suspend fun saveToMemory(memory: MemoryStore, role: String, text: String) {
         try {
-            memory.add(role, text)
+            conversationIds += memory.add(role, text)
         } catch (e: Exception) {
             // The chat still works if memory can't be opened; the Memory screen explains why.
             SensingLog.add("Couldn't save a chat message to memory: ${e.message}")

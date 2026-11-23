@@ -62,15 +62,28 @@ class MemoryStore(context: Context) {
     /**
      * Saves a message, tagged with the strongest state of the last 10 seconds (so taking
      * the phone out to type doesn't turn "Walking" into "Moving"), or failing that the
-     * current state.
+     * current state. Returns its id.
      */
-    suspend fun add(role: String, text: String) {
+    suspend fun add(role: String, text: String): Long {
         val context = (ContextStatus.strongestRecent(SystemClock.elapsedRealtime())
             ?: ContextStatus.reading.value?.state)?.label
-        dao().insert(
+        val id = dao().insert(
             MemoryMessage(timeMillis = System.currentTimeMillis(), role = role, text = text, context = context)
         )
         MemoryLimit.check(appContext)
+        return id
+    }
+
+    /**
+     * The few past messages most related to [message], for sending along to Claude, leaving
+     * out [exclude] (the current conversation, which is sent in full anyway). Empty if
+     * nothing matches. Archived messages aren't searched.
+     */
+    suspend fun recall(message: String, exclude: Set<Long>): List<MemoryMessage> {
+        val fts = MemoryRecall.ftsQuery(message) ?: return emptyList()
+        return dao().searchNow(MemoryDatabase.recallQuery(fts, MemoryRecall.MAX_MEMORIES + exclude.size))
+            .filter { it.id !in exclude }
+            .take(MemoryRecall.MAX_MEMORIES)
     }
 
     suspend fun delete(message: MemoryMessage) = dao().delete(message.id)
