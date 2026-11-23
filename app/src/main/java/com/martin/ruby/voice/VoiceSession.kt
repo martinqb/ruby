@@ -25,6 +25,11 @@ data class VoiceUi(
     val note: String? = null,
     /** Why Ruby can't speak, or null. */
     val problem: String? = null,
+    /**
+     * The voice actually speaking: Android text-to-speech stands in for Kokoro until
+     * Kokoro is downloaded. Null before the settings are read.
+     */
+    val usingEngine: VoiceEngine? = null,
     val canListen: Boolean = true,
     /** True if speech recognition happens on the phone. */
     val listensOnDevice: Boolean = true,
@@ -43,7 +48,9 @@ object VoiceSession {
 
     private var appContext: Context? = null
     private var voice: RubyVoice? = null
-    private var engine: VoiceEngine? = null
+    /** What the current [voice] was made for: its engine and Kokoro speaker. */
+    private var voiceKey: Pair<VoiceEngine, KokoroSpeaker>? = null
+    private var lastPrefs: VoicePrefs? = null
     private var voiceWatch: Job? = null
     private var ears: RubyEars? = null
 
@@ -145,14 +152,26 @@ object VoiceSession {
 
     fun dismissNote() = _ui.update { it.copy(note = null) }
 
+    /** The Kokoro model finished downloading: switch to it if it's the chosen voice. */
+    fun kokoroInstalled(context: Context) = onMain {
+        lastPrefs?.let { useVoice(context.applicationContext, it) }
+    }
+
     private fun useVoice(context: Context, prefs: VoicePrefs) {
-        if (engine != prefs.engine || voice == null) {
+        lastPrefs = prefs
+        // Kokoro needs its model; until it's downloaded, Android text-to-speech speaks.
+        val engine = if (prefs.engine == VoiceEngine.KOKORO && !KokoroModel.isInstalled(context)) VoiceEngine.ANDROID else prefs.engine
+        val key = engine to prefs.kokoroSpeaker
+        if (voiceKey != key || voice == null) {
             voice?.close()
             voiceWatch?.cancel()
-            val v = prefs.engine.create(context)
+            val v = engine.create(context, prefs)
             voice = v
-            engine = prefs.engine
-            SensingLog.add("Voice: using ${prefs.engine.label}.")
+            voiceKey = key
+            _ui.update { it.copy(usingEngine = engine) }
+            SensingLog.add(
+                "Voice: using ${engine.label}" + if (engine == VoiceEngine.KOKORO) " (${prefs.kokoroSpeaker.label})." else "."
+            )
             voiceWatch = scope.launch {
                 launch { v.speaking.collect { s -> _ui.update { it.copy(speaking = s) } } }
                 launch { v.problem.collect { p -> _ui.update { it.copy(problem = p) } } }

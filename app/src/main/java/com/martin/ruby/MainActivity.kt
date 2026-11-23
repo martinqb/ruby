@@ -58,6 +58,7 @@ import com.martin.ruby.reminders.ReminderStore
 import com.martin.ruby.ui.ExportScreen
 import com.martin.ruby.ui.StorageScreen
 import com.martin.ruby.ui.theme.RubyTheme
+import com.martin.ruby.voice.KokoroModel
 import com.martin.ruby.voice.VoiceSession
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -208,6 +209,8 @@ class MainActivity : ComponentActivity() {
                                 onTestVoice = {
                                     VoiceSession.play("Hello. I'm Ruby. This is how I sound right now.")
                                 },
+                                onDownloadKokoro = { KokoroModel.download(applicationContext) },
+                                onCancelKokoro = { KokoroModel.cancelDownload(applicationContext) },
                                 onBack = { screen = Screen.MAIN },
                             ),
                             modifier = modifier,

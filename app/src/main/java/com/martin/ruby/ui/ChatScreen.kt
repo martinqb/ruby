@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -22,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -31,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -39,13 +43,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.martin.ruby.chat.ApiKeyStore
 import com.martin.ruby.chat.ChatTurn
 import com.martin.ruby.chat.ChatUi
+import com.martin.ruby.voice.KokoroModel
+import com.martin.ruby.voice.KokoroSpeaker
 import com.martin.ruby.voice.SpeakMode
+import com.martin.ruby.voice.VoiceEngine
 import com.martin.ruby.voice.VoicePrefs
 import com.martin.ruby.voice.VoiceStyle
 import com.martin.ruby.voice.VoiceUi
@@ -68,6 +76,8 @@ data class ChatActions(
     val onStopSpeaking: () -> Unit = {},
     val onSaveVoice: (VoicePrefs) -> Unit = {},
     val onTestVoice: () -> Unit = {},
+    val onDownloadKokoro: () -> Unit = {},
+    val onCancelKokoro: () -> Unit = {},
     val onBack: () -> Unit = {},
 )
 
@@ -129,10 +139,16 @@ fun ChatScreen(
     }
 
     if (showVoice) {
+        val appContext = LocalContext.current.applicationContext
+        val kokoroFlow = remember { KokoroModel.state(appContext) }
+        val kokoro by kokoroFlow.collectAsState(initial = KokoroModel.State.NotInstalled)
         VoiceDialog(
             voice = voice,
+            kokoro = kokoro,
             onSave = actions.onSaveVoice,
             onTest = actions.onTestVoice,
+            onDownloadKokoro = actions.onDownloadKokoro,
+            onCancelKokoro = actions.onCancelKokoro,
             onClose = { showVoice = false },
         )
     }
@@ -311,12 +327,21 @@ private fun Bubble(turn: ChatTurn, onPlay: ((String) -> Unit)?) {
     }
 }
 
-/** When Ruby speaks, and how she sounds. */
+/** When Ruby speaks, which voice she uses, and how she sounds. */
 @Composable
-private fun VoiceDialog(voice: VoiceUi, onSave: (VoicePrefs) -> Unit, onTest: () -> Unit, onClose: () -> Unit) {
+private fun VoiceDialog(
+    voice: VoiceUi,
+    kokoro: KokoroModel.State,
+    onSave: (VoicePrefs) -> Unit,
+    onTest: () -> Unit,
+    onDownloadKokoro: () -> Unit,
+    onCancelKokoro: () -> Unit,
+    onClose: () -> Unit,
+) {
     val prefs = voice.prefs
     var speed by remember { mutableFloatStateOf(prefs.style.speed) }
     var pitch by remember { mutableFloatStateOf(prefs.style.pitch) }
+    val usingKokoro = voice.usingEngine == VoiceEngine.KOKORO
 
     fun saveStyle() = onSave(prefs.copy(style = VoiceStyle(speed = speed, pitch = pitch)))
 
@@ -324,41 +349,36 @@ private fun VoiceDialog(voice: VoiceUi, onSave: (VoicePrefs) -> Unit, onTest: ()
         onDismissRequest = onClose,
         title = { Text("Ruby's voice") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("Read replies aloud", style = MaterialTheme.typography.titleSmall)
                 SpeakMode.entries.forEach { mode ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .selectable(selected = prefs.mode == mode, role = Role.RadioButton) {
-                                onSave(prefs.copy(mode = mode))
-                            }
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        RadioButton(selected = prefs.mode == mode, onClick = null)
-                        Spacer(Modifier.width(8.dp))
-                        Column {
-                            Text(mode.label, style = MaterialTheme.typography.bodyLarge)
-                            Text(
-                                mode.explained,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+                    Choice(mode.label, mode.explained, selected = prefs.mode == mode) { onSave(prefs.copy(mode = mode)) }
                 }
+
+                Spacer(Modifier.height(12.dp))
+                Text("Voice", style = MaterialTheme.typography.titleSmall)
+                KokoroSpeaker.entries.forEach { speaker ->
+                    Choice(
+                        "Kokoro: ${speaker.label}" + if (speaker == KokoroSpeaker.HEART) " (Ruby's default)" else "",
+                        "Made on this phone; works offline.",
+                        selected = prefs.engine == VoiceEngine.KOKORO && prefs.kokoroSpeaker == speaker,
+                    ) { onSave(prefs.copy(engine = VoiceEngine.KOKORO, kokoroSpeaker = speaker)) }
+                }
+                Choice(
+                    VoiceEngine.ANDROID.label,
+                    "The phone's own voice, set in Android's text-to-speech settings.",
+                    selected = prefs.engine == VoiceEngine.ANDROID,
+                ) { onSave(prefs.copy(engine = VoiceEngine.ANDROID)) }
+                if (prefs.engine == VoiceEngine.KOKORO) KokoroDownload(kokoro, onDownloadKokoro, onCancelKokoro)
+
                 Spacer(Modifier.height(12.dp))
                 Text("Speed: %.1f×".format(speed), style = MaterialTheme.typography.titleSmall)
                 Slider(value = speed, onValueChange = { speed = it }, onValueChangeFinished = ::saveStyle, valueRange = 0.5f..2.0f)
-                Text("Pitch: %.1f×".format(pitch), style = MaterialTheme.typography.titleSmall)
-                Slider(value = pitch, onValueChange = { pitch = it }, onValueChangeFinished = ::saveStyle, valueRange = 0.5f..1.5f)
-                Text(
-                    "Voice: ${prefs.engine.label}. The sound itself comes from the phone's text-to-speech " +
-                        "settings; a custom voice can be added later.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                // Kokoro has no pitch setting.
+                if (!usingKokoro) {
+                    Text("Pitch: %.1f×".format(pitch), style = MaterialTheme.typography.titleSmall)
+                    Slider(value = pitch, onValueChange = { pitch = it }, onValueChangeFinished = ::saveStyle, valueRange = 0.5f..1.5f)
+                }
                 voice.problem?.let {
                     Spacer(Modifier.height(4.dp))
                     Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -369,6 +389,61 @@ private fun VoiceDialog(voice: VoiceUi, onSave: (VoicePrefs) -> Unit, onTest: ()
         },
         confirmButton = { TextButton(onClick = onClose) { Text("Done") } },
     )
+}
+
+/** A radio-button row with a line of explanation. */
+@Composable
+private fun Choice(label: String, explained: String, selected: Boolean, onSelect: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(label, style = MaterialTheme.typography.bodyLarge)
+            Text(explained, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Whether the Kokoro voice is downloaded, and the button to do it. */
+@Composable
+private fun KokoroDownload(state: KokoroModel.State, onDownload: () -> Unit, onCancel: () -> Unit) {
+    val small = MaterialTheme.typography.bodySmall
+    Column(Modifier.padding(start = 32.dp, top = 4.dp)) {
+        when (state) {
+            KokoroModel.State.Installed -> Text("Downloaded. Ruby speaks with Kokoro.", style = small)
+            KokoroModel.State.NotInstalled -> {
+                Text(
+                    "Needs a one-time download of 126 MB (about 150 MB on the phone), over Wi-Fi. " +
+                        "Until then, Ruby uses the phone's own voice.",
+                    style = small,
+                )
+                OutlinedButton(onClick = onDownload) { Text("Download Kokoro voice") }
+            }
+            is KokoroModel.State.Downloading -> {
+                Text(
+                    when {
+                        state.waitingForWifi -> "Waiting for Wi-Fi to download…"
+                        state.fraction == null -> "Starting the download…"
+                        state.fraction >= 1f -> "Unpacking…"
+                        else -> "Downloading: ${(state.fraction * 100).toInt()}%"
+                    },
+                    style = small,
+                )
+                state.fraction?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+                TextButton(onClick = onCancel) { Text("Cancel") }
+            }
+            is KokoroModel.State.Failed -> {
+                Text("The download didn't work: ${state.why}", style = small, color = MaterialTheme.colorScheme.error)
+                OutlinedButton(onClick = onDownload) { Text("Try again") }
+            }
+        }
+    }
 }
 
 @Composable
