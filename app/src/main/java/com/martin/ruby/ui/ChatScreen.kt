@@ -54,6 +54,7 @@ import com.martin.ruby.chat.ApiKeyStore
 import com.martin.ruby.chat.ChatSession
 import com.martin.ruby.chat.ChatTurn
 import com.martin.ruby.chat.ChatUi
+import com.martin.ruby.ui.orb.OrbTheme
 import com.martin.ruby.voice.KokoroModel
 import com.martin.ruby.voice.KokoroSpeaker
 import com.martin.ruby.voice.SpeakMode
@@ -436,6 +437,15 @@ private fun VoiceDialog(
                     }
                     Spacer(Modifier.width(8.dp))
                     Switch(checked = prefs.showOrb, onCheckedChange = null)
+                }
+                if (prefs.showOrb) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Orb colors", style = MaterialTheme.typography.titleSmall)
+                    OrbTheme.entries.forEach { theme ->
+                        Choice(theme.label, theme.explained, selected = prefs.orbTheme == theme) {
+                            onSave(prefs.copy(orbTheme = theme))
+                        }
+                    }
                 }
             }
         },

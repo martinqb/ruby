@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.martin.ruby.data.dataStore
+import com.martin.ruby.ui.orb.OrbTheme
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -24,6 +25,8 @@ data class VoicePrefs(
     val style: VoiceStyle = VoiceStyle(),
     /** Ruby's animated orb on the main screen. */
     val showOrb: Boolean = true,
+    /** The orb's colors. */
+    val orbTheme: OrbTheme = OrbTheme.AURORA,
 )
 
 /** Ruby's voice settings, saved with the app's other settings. */
@@ -38,6 +41,7 @@ class VoiceSettings(private val context: Context) {
         val SPEED = floatPreferencesKey("voice_speed")
         val PITCH = floatPreferencesKey("voice_pitch")
         val SHOW_ORB = booleanPreferencesKey("show_orb")
+        val ORB_THEME = stringPreferencesKey("orb_theme")
     }
 
     val prefs: Flow<VoicePrefs> = context.dataStore.data.map { p ->
@@ -48,6 +52,7 @@ class VoiceSettings(private val context: Context) {
                 ?: KokoroSpeaker.HEART,
             style = VoiceStyle(speed = p[Keys.SPEED] ?: 1.0f, pitch = p[Keys.PITCH] ?: 1.0f),
             showOrb = p[Keys.SHOW_ORB] ?: true,
+            orbTheme = p[Keys.ORB_THEME]?.let { name -> OrbTheme.entries.firstOrNull { it.name == name } } ?: OrbTheme.AURORA,
         )
     }
 
@@ -59,6 +64,7 @@ class VoiceSettings(private val context: Context) {
             p[Keys.SPEED] = prefs.style.speed
             p[Keys.PITCH] = prefs.style.pitch
             p[Keys.SHOW_ORB] = prefs.showOrb
+            p[Keys.ORB_THEME] = prefs.orbTheme.name
         }
     }
 }

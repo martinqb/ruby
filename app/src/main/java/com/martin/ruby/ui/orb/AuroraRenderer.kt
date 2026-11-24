@@ -25,13 +25,13 @@ import kotlin.random.Random
  *
  * Sizes in the reference are pixels on a 168 px orb; here they're scaled to [orbPx].
  */
-class AuroraRenderer(private val orbPx: Float, from: Int = AuroraPalette.FROM, to: Int = AuroraPalette.TO) {
+class AuroraRenderer(private val orbPx: Float, theme: OrbTheme = OrbTheme.AURORA) {
 
     private val k = orbPx / 168f
     private val radius = orbPx / 2f
 
-    private val normal = AuroraPalette.normal(from, to)
-    private val thinking = AuroraPalette.thinking(from, to)
+    private val normal = theme.normal()
+    private val thinking = theme.thinking()
     private val error = AuroraPalette.error()
     private val palettes = arrayOf(normal, thinking, error)
 
