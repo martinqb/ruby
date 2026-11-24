@@ -93,7 +93,15 @@ class SkyTonightTest {
     fun theSkyFacts_forClaude() {
         val text = BriefingText.skyFacts(sampleSky())
         assertTrue(text, text.contains("Clear-sky chance this evening: good."))
-        assertTrue(text, text.contains("Moon: waxing gibbous, 78% lit, rises 2:10 PM, sets 3:20 AM."))
+        // Each time with its day: a set after midnight is tomorrow, not this evening.
+        assertTrue(text, text.contains("Moon: waxing gibbous, 78% lit, rises 2:10 PM today, sets 3:20 AM tomorrow."))
+        assertTrue(text, text.contains("Cloud cover by hour: 6:00 PM 60%, 7:00 PM 10%"))
+        // Free mode's shorter version: the summary only, and the top three planets.
+        val sky = sampleSky().copy(planets = List(5) { PlanetView("P$it", LocalDateTime.of(2026, 11, 24, 21, 0), 40, "south", -1.0 + it) })
+        val compact = BriefingText.skyFacts(sky, compact = true)
+        assertTrue(compact, compact.contains("Clear-sky chance this evening: good.\nClearest stretch: 7:00 PM to 12:00 AM tomorrow."))
+        assertTrue(compact, !compact.contains("Cloud cover by hour"))
+        assertEquals(3, Regex("^- P", RegexOption.MULTILINE).findAll(compact).count())
         assertTrue(text, text.contains("- Jupiter: highest around 11:40 PM, 52° up in the east, easy to see."))
     }
 }

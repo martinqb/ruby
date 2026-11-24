@@ -26,6 +26,9 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
+import com.martin.ruby.ai.AiEngine
+import com.martin.ruby.ai.AiSettings
+import com.martin.ruby.ai.FreeMode
 import com.martin.ruby.backup.BackupManager
 import com.martin.ruby.backup.BackupStatusStore
 import com.martin.ruby.backup.NightlyBackup
@@ -205,6 +208,17 @@ class MainActivity : ComponentActivity() {
                         },
                         onDownloadKokoro = { KokoroModel.download(applicationContext) },
                         onCancelKokoro = { KokoroModel.cancelDownload(applicationContext) },
+                        onChooseEngine = { engine ->
+                            lifecycleScope.launch {
+                                AiSettings(applicationContext).save(engine)
+                                SensingLog.add("AI engine: ${engine.label}.")
+                                if (engine == AiEngine.FREE) FreeMode.refresh()
+                            }
+                        },
+                        onCheckFreeMode = { lifecycleScope.launch { FreeMode.refresh() } },
+                        onDownloadFree = { lifecycleScope.launch { FreeMode.download() } },
+                        onUseClaude = { ChatSession.useClaudeForOffer(applicationContext) },
+                        onDeclineOffer = ChatSession::declineOffer,
                     )
                 }
 
@@ -371,6 +385,11 @@ class MainActivity : ComponentActivity() {
         checkPermissions()
         refreshCarState()
         startSensingIfEnabled()
+        // Free mode: check Gemini Nano, and make any summaries that are due while Ruby is open.
+        lifecycleScope.launch {
+            FreeMode.refresh()
+            if (AiSettings(applicationContext).current() == AiEngine.FREE) Summaries.catchUpInFreeMode(applicationContext)
+        }
     }
 
     private fun checkPermissions() {

@@ -50,6 +50,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.martin.ruby.BuildConfig
+import com.martin.ruby.ai.AiEngine
 import com.martin.ruby.chat.ApiKeyStore
 import com.martin.ruby.chat.ChatSession
 import com.martin.ruby.chat.ChatTurn
@@ -84,6 +85,15 @@ data class ChatActions(
     val onDownloadKokoro: () -> Unit = {},
     val onCancelKokoro: () -> Unit = {},
     val onBack: () -> Unit = {},
+    /** Claude or Free mode. */
+    val onChooseEngine: (AiEngine) -> Unit = {},
+    /** Checks whether Free mode is on this phone (quick). */
+    val onCheckFreeMode: () -> Unit = {},
+    /** Downloads Free mode's model (asked for by the user). */
+    val onDownloadFree: () -> Unit = {},
+    /** "Use Claude for this one": a reminder Free mode couldn't do. */
+    val onUseClaude: () -> Unit = {},
+    val onDeclineOffer: () -> Unit = {},
 )
 
 /** Chatting with Claude, as Ruby, by typing or talking. Asks for an API key first if there isn't one. */
@@ -98,6 +108,7 @@ fun ChatScreen(
 ) {
     var changingKey by rememberSaveable { mutableStateOf(false) }
     var showVoice by rememberSaveable { mutableStateOf(false) }
+    var showAi by rememberSaveable { mutableStateOf(false) }
 
     Column(modifier = modifier.fillMaxSize().imePadding().padding(16.dp)) {
         Row(verticalAlignment = Alignment.Top) {
@@ -105,7 +116,8 @@ fun ChatScreen(
             // Wraps onto a second line on narrow phones.
             FlowRow(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
                 if (voice.speaking) TextButton(onClick = actions.onStopSpeaking) { Text("Stop talking") }
-                if (ui.hasKey == true && !changingKey) {
+                TextButton(onClick = { showAi = true }) { Text("AI") }
+                if (ui.canChat && !changingKey) {
                     TextButton(onClick = actions.onNewConversation, enabled = !ui.sending && ui.turns.isNotEmpty()) {
                         Text("New chat")
                     }
@@ -118,15 +130,18 @@ fun ChatScreen(
                             armed = true
                         }) { Text(if (armed) "Next message: changed tools" else "Test: change tools (debug)") }
                     }
-                    TextButton(onClick = { changingKey = true }) { Text("Change key") }
+                    if (ui.hasKey == true) TextButton(onClick = { changingKey = true }) { Text("Change key") }
                 }
             }
         }
-        Text("Chat with Ruby", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            "Chat with Ruby" + if (ui.engine == AiEngine.FREE) " · Free mode" else "",
+            style = MaterialTheme.typography.headlineSmall,
+        )
 
         when {
-            ui.hasKey == null -> Unit // still checking
-            ui.hasKey == false || changingKey -> ApiKeyForm(
+            ui.hasKey == null && ui.engine == AiEngine.CLAUDE -> Unit // still checking
+            !ui.canChat || changingKey -> ApiKeyForm(
                 replacing = ui.hasKey == true,
                 onSave = { key ->
                     actions.onSaveKey(key)
@@ -144,6 +159,7 @@ fun ChatScreen(
 
     ChatErrorDialog(ui, actions.onDismissError)
     if (showVoice) VoiceSettingsDialog(voice, actions, onClose = { showVoice = false })
+    if (showAi) AiEngineDialog(ui, actions, onClose = { showAi = false })
 }
 
 /** Shown when a reply failed, on whichever screen the chat is on. */
@@ -194,9 +210,15 @@ private fun Conversation(
     }
 
     Text(
-        "Each message goes to Anthropic's Claude along with what Ruby senses you're doing" +
-            (if (context != null) " (now: $context)" else "") + " and a few related past messages " +
-            "from memory. Nothing else from the phone's sensors is sent.",
+        if (ui.engine == AiEngine.FREE) {
+            "Free mode: Gemini Nano answers on this phone, with what Ruby senses you're doing" +
+                (if (context != null) " (now: $context)" else "") + " and a few related past messages from " +
+                "memory. Nothing is sent to Claude unless Free mode isn't available or you say yes."
+        } else {
+            "Each message goes to Anthropic's Claude along with what Ruby senses you're doing" +
+                (if (context != null) " (now: $context)" else "") + " and a few related past messages " +
+                "from memory. Nothing else from the phone's sensors is sent."
+        },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -233,6 +255,14 @@ internal fun ChatInput(ui: ChatUi, voice: VoiceUi, hasMicPermission: Boolean, ac
     if (voice.listening) {
         Listening(voice, actions)
         return
+    }
+    if (ui.claudeOffer != null) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = actions.onUseClaude, enabled = !ui.sending) { Text("Use Claude for this one") }
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = actions.onDeclineOffer) { Text("No thanks") }
+        }
+        Spacer(Modifier.height(4.dp))
     }
     voice.note?.let { note ->
         Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)

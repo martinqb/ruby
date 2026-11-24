@@ -33,6 +33,8 @@ import com.martin.ruby.BuildConfig
 import com.martin.ruby.chat.ChatUi
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.foundation.layout.FlowRow
+import com.martin.ruby.ai.AiEngine
 import com.martin.ruby.ui.orb.AuroraOrb
 import com.martin.ruby.ui.orb.AuroraPalette
 import com.martin.ruby.ui.orb.OrbState
@@ -230,11 +232,13 @@ private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit, onOpenBriefing: ()
     val chat = ruby.chat
     val voice = ruby.voice
     var showVoice by rememberSaveable { mutableStateOf(false) }
+    var showAi by rememberSaveable { mutableStateOf(false) }
     var demo by remember { mutableStateOf<OrbState?>(null) }
     val shown = demo ?: orbStateFor(chat, voice)
 
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         if (voice.speaking) TextButton(onClick = ruby.chatActions.onStopSpeaking) { Text("Stop talking") }
+        TextButton(onClick = { showAi = true }) { Text(if (chat.engine == AiEngine.FREE) "AI: Free mode" else "AI: Claude") }
         TextButton(onClick = onOpenBriefing) { Text("Briefing") }
         TextButton(onClick = { showVoice = true }) { Text("Voice and orb") }
     }
@@ -278,15 +282,16 @@ private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit, onOpenBriefing: ()
         color = if (caption == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
     )
     Spacer(Modifier.height(12.dp))
-    when (chat.hasKey) {
-        null -> Unit // still checking
-        false -> Button(onClick = onOpenChat) { Text("Set up chat with Claude") }
-        true -> ChatInput(chat, voice, ruby.hasMicPermission, ruby.chatActions)
+    when {
+        chat.hasKey == null && chat.engine == AiEngine.CLAUDE -> Unit // still checking
+        !chat.canChat -> Button(onClick = onOpenChat) { Text("Set up chat with Claude") }
+        else -> ChatInput(chat, voice, ruby.hasMicPermission, ruby.chatActions)
     }
     TextButton(onClick = onOpenChat) { Text("Full conversation") }
 
     ChatErrorDialog(chat, ruby.chatActions.onDismissError)
     if (showVoice) VoiceSettingsDialog(voice, ruby.chatActions, onClose = { showVoice = false })
+    if (showAi) AiEngineDialog(chat, ruby.chatActions, onClose = { showAi = false })
 }
 
 /** The orb's amber error color for text: bright on dark backgrounds, darker on light ones to stay readable. */

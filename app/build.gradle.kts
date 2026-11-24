@@ -121,8 +121,8 @@ dependencies {
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
-    // Gemini Nano (the AI engine's Free mode). Debug builds only until Free mode is built.
-    debugImplementation(libs.genai.prompt)
+    // Gemini Nano: the AI engine's Free mode, on the phone.
+    implementation(libs.genai.prompt)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

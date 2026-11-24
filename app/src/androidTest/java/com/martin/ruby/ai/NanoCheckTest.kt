@@ -112,14 +112,17 @@ class NanoCheckTest {
                 timed("[$name] hello") { model.generateContent("Say good morning in five words.").candidates.first().text }
                     ?.let { log("[$name] hello answer: $it") }
 
+                // As Free mode writes it: the shorter prompt and Free mode's extra rules.
                 val facts = sampleFacts()
-                val prompt = BriefingText.prompt(facts)
+                val system = BriefingText.SYSTEM_PROMPT + BriefingText.FREE_MODE_RULES
+                val prompt = BriefingText.prompt(facts, compact = true)
                 timed("[$name] count briefing tokens") {
-                    model.countTokens(generateContentRequest(SystemInstruction(BriefingText.SYSTEM_PROMPT), TextPart(prompt)) {}).totalTokens
+                    model.countTokens(generateContentRequest(SystemInstruction(system), TextPart(prompt)) {}).totalTokens
                 }?.let { log("[$name] briefing prompt: $it tokens") }
+                prompt.lines().filter { it.startsWith("Moon:") || it.startsWith("Weather:") }.forEach { log("[$name] fact: $it") }
                 val briefing = timed("[$name] write a briefing") {
                     model.generateContent(
-                        generateContentRequest(SystemInstruction(BriefingText.SYSTEM_PROMPT), TextPart(prompt)) { maxOutputTokens = 600 }
+                        generateContentRequest(SystemInstruction(system), TextPart(prompt)) { maxOutputTokens = 700 }
                     ).candidates.first().text
                 }
                 if (briefing != null) {
@@ -153,9 +156,14 @@ class NanoCheckTest {
         }
     }
 
+    /** Facts that tripped Nano up on the phone: tonight's full moon, clear now but overcast later, the Lucy fossil. */
     private fun sampleFacts(): BriefingFacts {
         val zone = ZoneId.systemDefault()
         val now = LocalDateTime.now(zone).withHour(7).withMinute(42)
+        val hours = (0 until 48).map { h ->
+            com.martin.ruby.briefing.ForecastHour(now.toLocalDate().atStartOfDay().plusHours(h.toLong()), 27 + (h % 24) / 3, 10, 0.0, if (h < 10) 0 else 3, if (h < 10) 5 else 90, 12, 20000)
+        }
+        val forecast = com.martin.ruby.briefing.Forecast("F", "mph", 27, 0, 41, 25, 3, 10, null, null, hours)
         fun at(h: Int, m: Int) = now.withHour(h).withMinute(m).atZone(zone).toInstant().toEpochMilli()
         return BriefingFacts(
             now = now,
@@ -166,8 +174,13 @@ class NanoCheckTest {
             ),
             reminders = listOf(BriefingReminder("call Mom", dueMillis = at(17, 30))),
             headsUp = listOf("Rain likely from about 3:00 PM (70% chance): an umbrella would help."),
-            sky = SkyTonight.compute(39.10, -94.58, now.toLocalDate(), zone, null),
-            music = listOf(MusicMoment(1966, "The Beatles began recording Strawberry Fields Forever.", "event")),
+            forecast = forecast,
+            sky = SkyTonight.compute(39.10, -84.51, now.toLocalDate(), zone, forecast),
+            music = listOf(
+                MusicMoment(1974, "Donald Johanson and Tom Gray discover the 40% complete Australopithecus afarensis skeleton, " +
+                    "nicknamed \"Lucy\" (after The Beatles song \"Lucy in the Sky with Diamonds\"), in the Awash Valley of Ethiopia.", "event"),
+                MusicMoment(1941, "Pete Best, Indian-English drummer and songwriter", "birth"),
+            ),
             recentGreetings = listOf("Good morning! Coffee in hand, I hope."),
         )
     }
