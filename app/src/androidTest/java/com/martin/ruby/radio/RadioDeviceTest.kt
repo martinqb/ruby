@@ -145,6 +145,72 @@ class RadioDeviceTest {
         instrumentation.runOnMainSync { ChatSession.newConversation() }
     }
 
+    /** Another app's audio that ignores pause (stands in for iHeartRadio when it doesn't respond). */
+    private fun otherAppPlaying(): android.media.MediaPlayer = android.media.MediaPlayer().apply {
+        setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).build())
+        setDataSource(context, tone())
+        isLooping = true
+        prepare()
+        start()
+    }
+
+    @Test
+    fun stopSaid_whileIHeartPlays_isTrueToWhatHappened() {
+        emulatorOnly()
+        instrumentation.runOnMainSync { Radio.pretendOpenedInIHeart(Stations.WEBN) }
+        try {
+            // Nothing playing at all: says so, doesn't claim a pause.
+            assertEquals("WEBN 102.7 isn't playing right now.", kotlinx.coroutines.runBlocking { Radio.stopSaid(context) })
+            // Playing, and the pause doesn't take: says where it's playing and how to stop it.
+            val other = otherAppPlaying()
+            try {
+                assertTrue(waitUntil(3_000) { Radio.anythingPlaying(context) })
+                assertEquals(
+                    "WEBN 102.7 is playing in iHeartRadio. Pause it there or with your steering wheel.",
+                    kotlinx.coroutines.runBlocking { Radio.stopSaid(context) },
+                )
+                // And "stop" in the chat goes to the phone, not the AI.
+                instrumentation.runOnMainSync {
+                    ChatSession.newConversation()
+                    ChatSession.send(context, "stop")
+                }
+                assertTrue(waitUntil(5_000) { !ChatSession.ui.value.sending })
+                assertEquals(
+                    "WEBN 102.7 is playing in iHeartRadio. Pause it there or with your steering wheel.",
+                    ChatSession.ui.value.turns.last().text,
+                )
+            } finally {
+                other.release()
+            }
+        } finally {
+            instrumentation.runOnMainSync {
+                Radio.pretendOpenedInIHeart(null)
+                ChatSession.newConversation()
+            }
+        }
+    }
+
+    @Test
+    fun theAI_isToldWhatTheRadioDid() {
+        emulatorOnly()
+        instrumentation.runOnMainSync {
+            ChatSession.newConversation()
+            ChatSession.send(context, "Play the radio")
+        }
+        assertTrue(waitUntil(5_000) { !ChatSession.ui.value.sending })
+        val note = Radio.note().orEmpty()
+        assertTrue(note, note.contains("played WGRR 103.5 in Ruby"))
+        // The next message, to whichever AI, carries the note.
+        instrumentation.runOnMainSync { ChatSession.send(context, "Is the radio on?") }
+        assertTrue(waitUntil(10_000) { !ChatSession.ui.value.sending })
+        val sent = ChatSession.ui.value.turns.last { it.fromUser }.sent.orEmpty()
+        assertTrue(sent, sent.contains("[Radio (done by the phone; this really happened):") && sent.contains("played WGRR 103.5 in Ruby"))
+        instrumentation.runOnMainSync {
+            ChatSession.dismissError()
+            ChatSession.newConversation()
+        }
+    }
+
     @Test
     fun webn_opensInIHeartRadio_orSaysItIsNotInstalled() {
         emulatorOnly()

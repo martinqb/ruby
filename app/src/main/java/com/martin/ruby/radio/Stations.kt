@@ -74,16 +74,36 @@ object RadioCommands {
 
     /**
      * The radio command in [message], or null for an ordinary message. A bare "stop" only
-     * counts while the radio is playing ([radioOn]); otherwise it's left to the chat.
+     * counts while something is playing ([playing]: Ruby's radio, or another app such as
+     * iHeartRadio); otherwise it's left to the chat.
      */
-    fun parse(message: String, radioOn: Boolean): RadioCommand? {
+    fun parse(message: String, playing: Boolean): RadioCommand? {
         val m = message.lowercase().trim().trimEnd('.', '!', '?').trim()
-        if (STOP.matches(m) || (radioOn && BARE_STOP.matches(m))) return RadioCommand.Stop
+        if (STOP.matches(m) || (playing && BARE_STOP.matches(m))) return RadioCommand.Stop
         if (PLAY.containsMatchIn(m)) {
             Stations.find(m)?.let { return RadioCommand.Play(it) }
             if (Regex("\\bradio\\b").containsMatchIn(m)) return RadioCommand.Play(Stations.DEFAULT)
         }
         return null
+    }
+
+    /**
+     * The note sent to the AI with each message: what the phone has really done with the radio
+     * ([log], oldest first, like "9:10 AM: played WGRR 103.5 in Ruby"), so the AI never denies it.
+     * Null if nothing has happened yet.
+     */
+    fun note(nowPlaying: String?, log: List<String>): String? {
+        if (nowPlaying == null && log.isEmpty()) return null
+        return "Radio (done by the phone; this really happened): " + (nowPlaying ?: "nothing playing in Ruby now") + "." +
+            if (log.isEmpty()) "" else " Recently: " + log.joinToString("; ") + "."
+    }
+
+    /** What Ruby says after pressing pause for another app: did it stop? */
+    fun pauseReply(app: Station?, stopped: Boolean): String = when {
+        stopped && app != null -> "Paused ${app.name} in iHeartRadio."
+        stopped -> "Paused."
+        app != null -> "${app.name} is playing in iHeartRadio. Pause it there or with your steering wheel."
+        else -> "Something's playing in another app. Pause it there or with your steering wheel."
     }
 
     /** After the morning briefing in the car: start the radio if that's on and she wasn't stopped. */

@@ -155,11 +155,11 @@ object ChatSession {
         scope.launch {
             val memory = MemoryStore(appContext)
             // Radio commands are done on the phone, in either engine, without asking any AI.
-            RadioCommands.parse(message, Radio.state.value.on)?.let { command ->
+            RadioCommands.parse(message, Radio.anythingPlaying(appContext))?.let { command ->
                 saveToMemory(memory, MemoryMessage.ROLE_USER, message)
                 val reply = when (command) {
                     is RadioCommand.Play -> Radio.play(appContext, command.station)
-                    RadioCommand.Stop -> Radio.stop(appContext)
+                    RadioCommand.Stop -> Radio.stopSaid(appContext)
                 }
                 _ui.update { it.copy(turns = it.turns + ChatTurn(fromUser = false, text = reply), sending = false, replying = null) }
                 saveToMemory(memory, MemoryMessage.ROLE_RUBY, reply)
@@ -175,6 +175,7 @@ object ChatSession {
                 // The reminders as they are right now, so Ruby never goes by stale tool results.
                 sent = ClaudeChat.compose(
                     message, label, now, currentReminders(appContext), currentPlaces(appContext), MemoryRecall.formatRecalled(memories),
+                    radio = Radio.note(),
                 ),
                 memoriesUsed = memories.size,
             )

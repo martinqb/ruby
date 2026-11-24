@@ -66,6 +66,33 @@ object Radio {
 
     private var controller: MediaController? = null
 
+    /** What the phone did with the radio lately ("9:10 AM: played WGRR 103.5 in Ruby"), oldest first. */
+    private val log = ArrayDeque<String>()
+
+    private fun record(what: String) {
+        val time = java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.US).format(java.time.LocalTime.now())
+        log.addLast("$time: $what")
+        while (log.size > LOG_KEPT) log.removeFirst()
+        SensingLog.add("Radio: $what.")
+    }
+
+    /** The note for the AI: what's playing and what the phone did (see [RadioCommands.note]). */
+    fun note(): String? {
+        val s = _state.value
+        val now = when {
+            s.on -> "${s.station?.name} is playing in Ruby"
+            s.inIHeart != null && recentIHeart(s) -> "${s.inIHeart.name} was opened in the iHeartRadio app (it plays there, not in Ruby)"
+            else -> null
+        }
+        return RadioCommands.note(now, log.toList())
+    }
+
+    private fun recentIHeart(s: State) = s.inIHeart != null && SystemClock.elapsedRealtime() - s.inIHeartSince < IHEART_RECENT_MS
+
+    /** Whether anything is playing: Ruby's radio, or another app such as iHeartRadio. */
+    fun anythingPlaying(context: Context): Boolean =
+        _state.value.on || context.getSystemService(AudioManager::class.java).isMusicActive
+
     private suspend fun controller(context: Context): MediaController = withContext(Dispatchers.Main) {
         controller?.takeIf { it.isConnected } ?: run {
             val app = context.applicationContext
@@ -121,7 +148,7 @@ object Radio {
 
     /** Plays [uri] as [station] (tests play a local file). */
     internal fun playUri(context: Context, uri: Uri, station: Station) {
-        SensingLog.add("Radio: playing ${station.name}.")
+        record("played ${station.name} in Ruby")
         _state.value = State(station = station, starting = true)
         scope.launch {
             try {
@@ -142,26 +169,39 @@ object Radio {
         }
     }
 
-    /**
-     * Stops the radio. If Ruby's radio isn't on but a station was opened in iHeartRadio, presses
-     * pause for whatever's playing (iHeartRadio). Returns what Ruby says.
-     */
+    /** Stops Ruby's radio (the Stop buttons). Returns what Ruby says. */
     fun stop(context: Context): String {
-        val s = _state.value
-        if (s.on) {
-            controller?.run {
-                stop()
-                clearMediaItems()
+        if (!_state.value.on) return "The radio isn't on."
+        controller?.run {
+            stop()
+            clearMediaItems()
+        }
+        _state.value = _state.value.copy(station = null, playing = false, starting = false, problem = null)
+        record("stopped the radio in Ruby")
+        return "Radio off."
+    }
+
+    /**
+     * "Stop" said in the chat: stops Ruby's radio, or if another app is playing (like WEBN in
+     * iHeartRadio), presses pause through Android's media controls and checks it worked. Returns
+     * what Ruby says, true to what happened.
+     */
+    suspend fun stopSaid(context: Context): String {
+        if (_state.value.on) return stop(context)
+        val audio = context.getSystemService(AudioManager::class.java)
+        val app = _state.value.inIHeart?.takeIf { recentIHeart(_state.value) }
+        if (!audio.isMusicActive) return if (app != null) "${app.name} isn't playing right now." else "The radio isn't on."
+        pauseWhateverPlays(context)
+        var stopped = false
+        repeat(10) {
+            kotlinx.coroutines.delay(150)
+            if (!audio.isMusicActive) {
+                stopped = true
+                return@repeat
             }
-            _state.value = State()
-            SensingLog.add("Radio: stopped.")
-            return "Radio off."
         }
-        if (s.inIHeart != null && SystemClock.elapsedRealtime() - s.inIHeartSince < IHEART_RECENT_MS) {
-            pauseWhateverPlays(context)
-            return "Paused ${s.inIHeart.name} in iHeartRadio."
-        }
-        return "The radio isn't on."
+        record(if (stopped) "paused ${app?.name ?: "another app"}" else "pressed pause, but ${app?.name ?: "the other app"} kept playing")
+        return RadioCommands.pauseReply(app, stopped)
     }
 
     /** Opens [station] in the iHeartRadio app (the fallback). Returns what Ruby says. */
@@ -195,7 +235,7 @@ object Radio {
             stop()
             clearMediaItems()
         }
-        SensingLog.add("Radio: opened ${station.name} in iHeartRadio.")
+        record("opened ${station.name} in the iHeartRadio app")
         _state.value = State(inIHeart = station, inIHeartSince = SystemClock.elapsedRealtime())
     }
 
@@ -223,6 +263,12 @@ object Radio {
     internal val volume: Float get() = controller?.volume ?: 1f
 
     private const val IHEART_RECENT_MS = 6 * 60 * 60_000L
+    private const val LOG_KEPT = 5
+
+    /** For tests: as if [station] had just been opened in iHeartRadio. */
+    internal fun pretendOpenedInIHeart(station: Station?) {
+        _state.value = if (station == null) State() else State(inIHeart = station, inIHeartSince = SystemClock.elapsedRealtime())
+    }
 
     private val NETWORK_ERRORS = setOf(
         PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
