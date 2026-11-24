@@ -1,6 +1,7 @@
 package com.martin.ruby.voice
 
 import android.content.Context
+import android.os.SystemClock
 import com.martin.ruby.decision.ContextState
 import com.martin.ruby.decision.ContextStatus
 import com.martin.ruby.log.SensingLog
@@ -88,11 +89,22 @@ object VoiceSession {
     fun replyStarted(speak: Boolean) = onMain {
         voice?.stop()
         chunker = if (speak) SpeechChunker() else null
+        replyArrived = false
     }
 
+    /** Whether this reply's first words have arrived yet (for timing the first sound). */
+    private var replyArrived = false
+
     /** More of the reply has arrived. Can be called from any thread. */
-    fun replyProgress(soFar: String) = onMain {
-        chunker?.feed(soFar)?.forEach { voice?.say(it) }
+    fun replyProgress(soFar: String) {
+        val now = SystemClock.elapsedRealtime()
+        onMain {
+            if (chunker != null && !replyArrived && soFar.isNotBlank()) {
+                replyArrived = true
+                voice?.noteReplyArrived(now)
+            }
+            chunker?.feed(soFar)?.forEach { voice?.say(it) }
+        }
     }
 
     fun replyFinished() = onMain {

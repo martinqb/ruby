@@ -29,6 +29,12 @@ interface RubyVoice {
 
     fun setStyle(style: VoiceStyle)
 
+    /**
+     * A spoken reply's first words arrived at [atMillis] (SystemClock.elapsedRealtime), so the
+     * voice can log how long it took to start talking. Optional.
+     */
+    fun noteReplyArrived(atMillis: Long) {}
+
     /** Frees the engine. The voice can't be used afterwards. */
     fun close()
 }

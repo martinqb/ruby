@@ -123,7 +123,7 @@ Be upfront in the privacy policy: each message and its memory snippets still go 
 
 **Status (Nov 23, 2026):** voice came early: the chat already speaks with Android text-to-speech and listens with on-device speech-to-text, behind `RubyVoice` and `RubyEars`. Location reminders (step 4) are done too, along with time reminders: Ruby sets, lists and cancels them from the chat (her first tools), they fire on arriving at a saved place or at a time, and they're stored in the encrypted memory database. Each message carries the reminders waiting right then, so Ruby never goes by stale tool results.
 
-The Kokoro on-device voice (step 9) is done too: af_heart is Ruby's default voice and af_nicole a second option, working offline after a one-time 126 MB download; numbers and unknown words are written out first, since this Kokoro drops them.
+The Kokoro on-device voice (step 9) is done too: af_heart is Ruby's default voice and af_nicole a second option, working offline after a one-time 126 MB download. Ruby works out the sounds of each word herself (dictionary, then regular endings like -s and -ed, then spelling as a last resort) and writes out numbers, units and symbols, since this Kokoro drops words it lacks. Her first sound comes about 1.5 seconds after a reply starts arriving; Kokoro needs about 0.9 seconds even for one word on the phone, so a faster start would need a faster model.
 
 **Next:** the morning briefing (step 1), spoken in the Kokoro voice.
 
