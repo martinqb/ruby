@@ -6,6 +6,8 @@ import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.util.Log
+import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
@@ -93,15 +95,22 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
         val clean = text.trim()
         if (clean.isEmpty() || closed || _problem.value != null) return
         synchronized(state) {
-            // Long sentences go in phrases, each made quickly, so a long sentence after a short
-            // one doesn't leave a silence while it's made (see KokoroText.phrases).
-            for (phrase in KokoroText.phrases(clean)) {
+            // Numbers, units and symbols become words first; then long sentences go in phrases,
+            // each made quickly, so a long sentence after a short one doesn't leave a silence
+            // while it's made (see KokoroText).
+            val starting = !_speaking.value
+            val phrases = KokoroText.phrases(KokoroText.normalize(clean))
+            // At the start of a stretch of speech, short first pieces, so she starts talking soon.
+            for (phrase in if (starting) KokoroText.leadIn(phrases) else phrases) {
                 pending.incrementAndGet()
                 lines.add(Line(epoch.get(), phrase))
             }
-            if (!_speaking.value) {
+            if (starting) {
                 _speaking.value = true
                 audio.requestAudioFocus(focus)
+                // Timing the first sound of this stretch of speech (see firstSound()).
+                sayStartedAt = SystemClock.elapsedRealtime()
+                awaitingFirstSound = true
             }
         }
     }
@@ -123,6 +132,10 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
         }
     }
 
+    override fun noteReplyArrived(atMillis: Long) {
+        replyArrivedAt = atMillis
+    }
+
     override fun setStyle(style: VoiceStyle) {
         speed = style.speed // Kokoro has no pitch setting
     }
@@ -138,8 +151,8 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
 
     private var tts: OfflineTts? = null // maker thread only
 
-    /** The dictionary's words, to spot ones Kokoro would drop (see [KokoroText]). Maker thread only. */
-    private var lexicon: Set<String> = emptySet()
+    /** Turns words into Kokoro's sounds, from its dictionary. Maker thread only. */
+    private var phonemizer: KokoroPhonemizer? = null
 
     private fun makeLoop() {
         try {
@@ -165,11 +178,16 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
     private fun make(line: Line) {
         val engine = engine() ?: return
         val rate = engine.sampleRate()
-        // Numbers become words and unknown words are spelled out: Kokoro would drop them.
-        val spoken = KokoroText.prepare(line.text) { it in lexicon }
-        engine.generateWithCallback(spoken, speaker.sid, speed, SampleSink { samples ->
-            hand(Chunk(line.epoch, samples, rate)) // false (stop making) once stopped
-        })
+        // Ruby works out the sounds herself and hands Kokoro those, not text: given text, the
+        // library skips every word its dictionary lacks (plurals, past tenses, possessives) and
+        // any word with a quote or bracket stuck to it.
+        val sounds = phonemizer!!.phonemes(line.text)
+        if (sounds.isNotBlank()) {
+            val config = GenerationConfig(sid = speaker.sid, speed = speed, phonemeCodepoints = arrayOf(sounds.codePoints().toArray()))
+            engine.generateWithConfigAndCallback("", config, SampleSink { samples ->
+                hand(Chunk(line.epoch, samples, rate)) // false (stop making) once stopped
+            })
+        }
         hand(Chunk(line.epoch, FloatArray(0), rate, done = true))
     }
 
@@ -189,8 +207,21 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
             stop()
             return null
         }
-        lexicon = loadLexicon(modelDir)
-        return OfflineTts(config = kokoroConfig(modelDir)).also { tts = it }
+        // Read the dictionary (about 0.7 s on the phone) while Kokoro loads (about 0.85 s).
+        var loaded: KokoroPhonemizer? = null
+        var failed: Throwable? = null
+        val reader = Thread({
+            try {
+                loaded = loadPhonemizer(modelDir)
+            } catch (e: Throwable) {
+                failed = e
+            }
+        }, "kokoro-dictionary").apply { start() }
+        val engine = OfflineTts(config = kokoroConfig(modelDir))
+        reader.join()
+        failed?.let { engine.release(); throw it }
+        phonemizer = loaded
+        return engine.also { tts = it }
     }
 
     // The player: audio out of the speaker
@@ -249,6 +280,10 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
             playingEpoch = chunk.epoch
         }
         if (out.playState != AudioTrack.PLAYSTATE_PLAYING) out.play()
+        if (awaitingFirstSound) {
+            awaitingFirstSound = false
+            firstSound(SystemClock.elapsedRealtime())
+        }
         var offset = 0
         while (offset < chunk.samples.size) {
             if (chunk.epoch != epoch.get()) return // stopped: write no more
@@ -289,6 +324,35 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
             lastPosition = position
             Thread.sleep(20)
         }
+    }
+
+    // Time to first sound
+
+    @Volatile private var replyArrivedAt = 0L
+    @Volatile private var sayStartedAt = 0L
+    @Volatile private var awaitingFirstSound = false
+
+    /** For tests: the last stretch of speech's time from the first say() to the first sound. */
+    @Volatile internal var lastFirstSoundMillis = -1L
+        private set
+
+    /**
+     * Logs how long the first sound took: from the reply starting to arrive (if this is a
+     * reply), split into waiting for its first sentence and Kokoro making it.
+     */
+    private fun firstSound(now: Long) {
+        val making = now - sayStartedAt
+        lastFirstSoundMillis = making
+        val reply = replyArrivedAt
+        val message = if (reply in 1..sayStartedAt && sayStartedAt - reply < 60_000) {
+            "Voice: first sound ${now - reply} ms after the reply started arriving " +
+                "(${sayStartedAt - reply} ms for its first sentence, $making ms making it)."
+        } else {
+            "Voice: first sound $making ms after it was asked to speak."
+        }
+        replyArrivedAt = 0
+        Log.i("RubyVoice", message)
+        SensingLog.add(message)
     }
 
     /** For tests: silences mid-speech, while the next piece was still being made, and their total length. */
@@ -342,23 +406,23 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
         /** How much made audio (in chunks, roughly sentences) may wait to be played. */
         private const val MAX_CHUNKS_AHEAD = 8
 
-        /** The words in the model's US English dictionary (the first field of each line). */
-        fun loadLexicon(dir: File): Set<String> = HashSet<String>(250_000).also { words ->
-            File(dir, KokoroModel.LEXICON_US).forEachLine { line ->
-                val end = line.indexOf(' ')
-                if (end > 0) words += line.substring(0, end)
-            }
-        }
+        /** Ruby's own reader of the model's US English dictionary (see [KokoroPhonemizer]). */
+        fun loadPhonemizer(dir: File) = KokoroPhonemizer(
+            File(dir, KokoroModel.LEXICON_US).bufferedReader().useLines { KokoroPhonemizer.load(it) }
+        )
 
-        /** How the model in [dir] is loaded; the device test uses the same. */
-        fun kokoroConfig(dir: File) = OfflineTtsConfig(
+        /**
+         * How the model in [dir] is loaded; the device tests use the same. Ruby hands Kokoro
+         * sounds, not text, so it doesn't load its own copy of the dictionary unless
+         * [withLexicon] (tests that give it text).
+         */
+        fun kokoroConfig(dir: File, withLexicon: Boolean = false) = OfflineTtsConfig(
             model = OfflineTtsModelConfig(
                 kokoro = OfflineTtsKokoroModelConfig(
                     model = File(dir, KokoroModel.MODEL).path,
                     voices = File(dir, KokoroModel.VOICES).path,
                     tokens = File(dir, KokoroModel.TOKENS).path,
-                    // The lexicon decides the language: American English.
-                    lexicon = File(dir, KokoroModel.LEXICON_US).path,
+                    lexicon = if (withLexicon) File(dir, KokoroModel.LEXICON_US).path else "",
                 ),
                 numThreads = THREADS,
             ),

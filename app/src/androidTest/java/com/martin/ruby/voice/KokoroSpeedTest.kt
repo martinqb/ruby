@@ -30,7 +30,7 @@ class KokoroSpeedTest {
         assumeTrue("Needs the Kokoro voice downloaded", KokoroModel.isInstalled(context))
         val dir = KokoroModel.dir(context)
         for (threads in listOf(1, 2, 4, 6, 8)) {
-            val config = KokoroVoice.kokoroConfig(dir).let { c -> c.copy(model = c.model.copy(numThreads = threads)) }
+            val config = KokoroVoice.kokoroConfig(dir, withLexicon = true).let { c -> c.copy(model = c.model.copy(numThreads = threads)) }
             val tts = OfflineTts(config = config)
             try {
                 tts.generate("Warm up.", KokoroSpeaker.HEART.sid, 1.0f) // first run is slower
