@@ -59,6 +59,26 @@ class KokoroTextTest {
     }
 
     @Test
+    fun longSentences_splitAtPauses_shortOnesDont() {
+        assertEquals(listOf("Good morning."), KokoroText.phrases("Good morning."))
+        assertEquals(
+            listOf("Your tyre check is at nine,", "and it's thirty six degrees outside, so take a coat."),
+            KokoroText.phrases("Your tyre check is at nine, and it's thirty six degrees outside, so take a coat."),
+        )
+        // No pause to split at: left whole rather than cut mid-phrase.
+        val noPause = "This sentence has no commas in it at all but it is still rather long to say"
+        assertEquals(listOf(noPause), KokoroText.phrases(noPause))
+        // A short tail joins the phrase before it, and every word is kept, in order.
+        val text = "First we'll check the oil and the tyres at the garage on Elm Street, then lunch, ok."
+        val parts = KokoroText.phrases(text)
+        assertEquals(text, parts.joinToString(" "))
+        assert(parts.all { it.length >= KokoroText.MIN_PHRASE }) { parts.toString() }
+        // Dashes and semicolons are pauses too.
+        assertEquals(2, KokoroText.phrases("The meeting moved to Thursday at three — bring the budget numbers please").size)
+        assertEquals(2, KokoroText.phrases("Milk, eggs and bread from the store on the corner; then the pharmacy for Mom").size)
+    }
+
+    @Test
     fun numberWords() {
         assertEquals("zero", KokoroText.words(0))
         assertEquals("one hundred", KokoroText.words(100))

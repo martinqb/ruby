@@ -367,6 +367,9 @@ private fun VoiceDialog(
 
                 Spacer(Modifier.height(12.dp))
                 Text("Voice", style = MaterialTheme.typography.titleSmall)
+                // The Kokoro voices' status sits with them, whichever voice is chosen, so it's clear
+                // what it belongs to (and Kokoro can be downloaded before switching to it).
+                KokoroDownload(kokoro, onDownloadKokoro, onCancelKokoro)
                 KokoroSpeaker.entries.forEach { speaker ->
                     Choice(
                         "Kokoro: ${speaker.label}" + if (speaker == KokoroSpeaker.HEART) " (Ruby's default)" else "",
@@ -379,7 +382,6 @@ private fun VoiceDialog(
                     "The phone's own voice, set in Android's text-to-speech settings.",
                     selected = prefs.engine == VoiceEngine.ANDROID,
                 ) { onSave(prefs.copy(engine = VoiceEngine.ANDROID)) }
-                if (prefs.engine == VoiceEngine.KOKORO) KokoroDownload(kokoro, onDownloadKokoro, onCancelKokoro)
 
                 Spacer(Modifier.height(12.dp))
                 Text("Speed: %.1f×".format(speed), style = MaterialTheme.typography.titleSmall)
@@ -420,28 +422,28 @@ private fun Choice(label: String, explained: String, selected: Boolean, onSelect
     }
 }
 
-/** Whether the Kokoro voice is downloaded, and the button to do it. */
+/** Whether the Kokoro voices are downloaded, and the button to do it; shown above them. */
 @Composable
 private fun KokoroDownload(state: KokoroModel.State, onDownload: () -> Unit, onCancel: () -> Unit) {
     val small = MaterialTheme.typography.bodySmall
-    Column(Modifier.padding(start = 32.dp, top = 4.dp)) {
+    Column(Modifier.padding(top = 4.dp, bottom = 2.dp)) {
         when (state) {
-            KokoroModel.State.Installed -> Text("Downloaded. Ruby speaks with Kokoro.", style = small)
+            KokoroModel.State.Installed -> Text("Kokoro voices: downloaded.", style = small)
             KokoroModel.State.NotInstalled -> {
                 Text(
-                    "Needs a one-time download of 126 MB (about 150 MB on the phone), over Wi-Fi. " +
-                        "Until then, Ruby uses the phone's own voice.",
+                    "Kokoro voices: not downloaded yet. A one-time download of 126 MB (about 150 MB on the " +
+                        "phone), over Wi-Fi. Until then, Ruby uses the phone's own voice.",
                     style = small,
                 )
                 OutlinedButton(onClick = onDownload) { Text("Download Kokoro voice") }
             }
             is KokoroModel.State.Downloading -> {
                 Text(
-                    when {
-                        state.waitingForWifi -> "Waiting for Wi-Fi to download…"
-                        state.fraction == null -> "Starting the download…"
-                        state.fraction >= 1f -> "Unpacking…"
-                        else -> "Downloading: ${(state.fraction * 100).toInt()}%"
+                    "Kokoro voices: " + when {
+                        state.waitingForWifi -> "waiting for Wi-Fi to download…"
+                        state.fraction == null -> "starting the download…"
+                        state.fraction >= 1f -> "unpacking…"
+                        else -> "downloading, ${(state.fraction * 100).toInt()}%"
                     },
                     style = small,
                 )
@@ -449,7 +451,7 @@ private fun KokoroDownload(state: KokoroModel.State, onDownload: () -> Unit, onC
                 TextButton(onClick = onCancel) { Text("Cancel") }
             }
             is KokoroModel.State.Failed -> {
-                Text("The download didn't work: ${state.why}", style = small, color = MaterialTheme.colorScheme.error)
+                Text("Kokoro voices: the download didn't work. ${state.why}", style = small, color = MaterialTheme.colorScheme.error)
                 OutlinedButton(onClick = onDownload) { Text("Try again") }
             }
         }

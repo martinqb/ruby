@@ -67,6 +67,27 @@ class KokoroDeviceTest {
             }
             assertTrue("Heart and Nicole should sound different", !bySpeaker[KokoroSpeaker.HEART].contentEquals(bySpeaker[KokoroSpeaker.NICOLE]))
 
+            // Streaming, the way the app speaks: audio arrives through the callback. This crashed
+            // the app (the native code couldn't find the callback's method) until KokoroVoice.SampleSink.
+            var streamed = 0
+            var chunks = 0
+            tts.generateWithCallback(sentence, KokoroSpeaker.HEART.sid, 1.0f, KokoroVoice.SampleSink { samples ->
+                streamed += samples.size
+                chunks++
+                true
+            })
+            log("Streamed $streamed samples in $chunks chunks")
+            assertTrue("Audio should come through the callback", streamed > tts.sampleRate()) // over a second
+
+            // Stop: returning false ends it early, as Stop talking does.
+            var afterStop = 0
+            tts.generateWithCallback("$sentence $sentence $sentence", KokoroSpeaker.HEART.sid, 1.0f, KokoroVoice.SampleSink { samples ->
+                afterStop += samples.size
+                false
+            })
+            log("Stopped after $afterStop samples")
+            assertTrue("Stopping should end it well before the whole text", afterStop < streamed)
+
             // Kokoro drops digits and words it doesn't know; KokoroText writes them out first.
             val lexicon = KokoroVoice.loadLexicon(KokoroModel.dir(context))
             log("Dictionary: ${lexicon.size} words")

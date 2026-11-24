@@ -8,6 +8,41 @@ package com.martin.ruby.voice
  */
 object KokoroText {
 
+    /** Phrases longer than this are split at a pause (see [phrases]). */
+    const val MAX_PHRASE = 60
+
+    /** Pieces shorter than this are joined to the next, so speech doesn't get choppy. */
+    const val MIN_PHRASE = 20
+
+    /**
+     * Splits a long sentence at its natural pauses (after a comma, semicolon, colon or dash),
+     * keeping the punctuation with each piece, into phrases of about [maxLength] characters.
+     * Kokoro makes a whole piece before any of it can be played, and only a little faster
+     * than it's spoken, so a long sentence after a short one used to leave a silence. Short
+     * text is returned as it is.
+     */
+    fun phrases(text: String, maxLength: Int = MAX_PHRASE, minLength: Int = MIN_PHRASE): List<String> {
+        val clean = text.trim()
+        if (clean.length <= maxLength) return listOf(clean).filter { it.isNotEmpty() }
+        val pieces = Regex("(?<=[,;:—–])\\s+|\\s+(?=[—–]\\s)").split(clean).map { it.trim() }.filter { it.isNotEmpty() }
+        val out = mutableListOf<String>()
+        val current = StringBuilder()
+        for (piece in pieces) {
+            if (current.isNotEmpty() && current.length >= minLength && current.length + 1 + piece.length > maxLength) {
+                out += current.toString()
+                current.clear()
+            }
+            if (current.isNotEmpty()) current.append(' ')
+            current.append(piece)
+        }
+        if (current.isNotEmpty()) {
+            // A short tail joins the phrase before it.
+            if (current.length < minLength && out.isNotEmpty()) out[out.lastIndex] = out.last() + " " + current
+            else out += current.toString()
+        }
+        return out
+    }
+
     /** [known] says whether the dictionary has a (lowercase) word. */
     fun prepare(text: String, known: (String) -> Boolean): String {
         var s = text.replace('’', '\'').replace('‘', '\'')
