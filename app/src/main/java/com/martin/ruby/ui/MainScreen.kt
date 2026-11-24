@@ -241,6 +241,7 @@ private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit) {
             state = shown,
             level = if (demo != null) DEMO_LEVEL else ruby.liveLevel,
             modifier = Modifier.testTag(ORB_TAG),
+            theme = voice.prefs.orbTheme,
             onLongPress = if (!BuildConfig.DEBUG) null else {
                 { demo = OrbState.entries.getOrNull((demo?.ordinal ?: -1) + 1) }
             },

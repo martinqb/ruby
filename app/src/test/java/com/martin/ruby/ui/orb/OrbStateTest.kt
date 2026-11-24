@@ -119,6 +119,43 @@ class OrbStateTest {
     }
 
     @Test
+    fun rubyThemeIsRed_andErrorStaysAmberOnEveryTheme() {
+        fun hue(c: Int): Float {
+            val hsv = FloatArray(3)
+            val r = ((c shr 16) and 0xFF) / 255f
+            val g = ((c shr 8) and 0xFF) / 255f
+            val b = (c and 0xFF) / 255f
+            val max = maxOf(r, g, b)
+            val min = minOf(r, g, b)
+            val d = max - min
+            if (d == 0f) return 0f
+            val h = when (max) {
+                r -> 60f * (((g - b) / d) % 6f)
+                g -> 60f * ((b - r) / d + 2f)
+                else -> 60f * ((r - g) / d + 4f)
+            }
+            hsv[0] = if (h < 0) h + 360f else h
+            return hsv[0]
+        }
+        fun isRed(c: Int) = hue(c).let { it >= 320f || it <= 10f }
+        val ruby = OrbTheme.RUBY.normal()
+        for (c in listOf(ruby.green, ruby.cyan, ruby.pink, ruby.glow)) assertTrue("ruby band should be red: ${Integer.toHexString(c)}", isRed(c))
+        // Its sky is a wine-colored night: dark and red-leaning.
+        assertTrue(isRed(ruby.skyTop) && ((ruby.skyTop shr 16) and 0xFF) < 0x40)
+        // Thinking leans toward plum: more blue than normal.
+        assertTrue((OrbTheme.RUBY.thinking().glow and 0xFF) > (ruby.glow and 0xFF))
+        // Aurora is unchanged.
+        assertEquals(AuroraPalette.normal(), OrbTheme.AURORA.normal())
+        // Error is the same amber on every theme, well away from ruby red.
+        val amber = hue(AuroraPalette.AMBER)
+        assertTrue("amber hue $amber", amber in 25f..45f)
+        for (theme in OrbTheme.entries) {
+            val diff = kotlin.math.abs(hue(theme.normal().glow) - amber).let { minOf(it, 360f - it) }
+            assertTrue("$theme's glow should be far from amber (hue gap $diff)", diff > 45f)
+        }
+    }
+
+    @Test
     fun errorHasItsOwnDoublePulse() {
         // Over one cycle: two quick peaks, then a long quiet rest.
         val samples = (0 until 160).map { OrbMath.errorPulse(it / 100.0) } // 1.6 s at 100 per second

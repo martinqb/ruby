@@ -186,6 +186,25 @@ class OrbAnimator(initial: OrbState = OrbState.IDLE) {
     }
 }
 
+/**
+ * The orb's color themes. Each has its own normal and thinking colors; the error state is
+ * amber on every theme ([AuroraPalette.error]), so it never blends in.
+ */
+enum class OrbTheme(val label: String, val explained: String) {
+    AURORA("Aurora", "Cyan and violet northern lights, as in the original design."),
+    RUBY("Ruby", "Ruby red and rose, on a deep wine-colored night sky.");
+
+    fun normal(): AuroraPalette = when (this) {
+        AURORA -> AuroraPalette.normal()
+        RUBY -> AuroraPalette.rubyNormal()
+    }
+
+    fun thinking(): AuroraPalette = when (this) {
+        AURORA -> AuroraPalette.thinking()
+        RUBY -> AuroraPalette.rubyThinking()
+    }
+}
+
 /** The orb's colors for one look (normal, thinking, error), as ARGB ints. */
 data class AuroraPalette(
     val skyHi: Int,
@@ -222,6 +241,33 @@ data class AuroraPalette(
             green = mix(to, from, 0.32f),
             pink = mix(to, 0xFFF472B6.toInt(), 0.45f),
             glow = mix(to, from, 0.25f),
+        )
+
+        /** Ruby: a ruby red. */
+        const val RUBY = 0xFFE0115F.toInt()
+
+        /** Ruby's darker partner, a plum that thinking leans toward. */
+        const val PLUM = 0xFF7E1F86.toInt()
+
+        /** The Ruby theme: ruby-red and rose light, with a raspberry accent, on a wine night. */
+        fun rubyNormal(): AuroraPalette {
+            val main = RUBY
+            val rose = 0xFFFF4D6D.toInt()
+            return AuroraPalette(
+                0xFF2A0C17.toInt(), 0xFF1B0810.toInt(), 0xFF13050B.toInt(), 0xFF070204.toInt(),
+                hi = 0xFFFFE4EC.toInt(),
+                green = main,
+                cyan = rose,
+                pink = 0xFFC2185B.toInt(), // raspberry
+                glow = mix(main, rose, 0.40f),
+            )
+        }
+
+        /** Ruby while thinking: leans toward plum, as Aurora's leans toward violet. */
+        fun rubyThinking() = rubyNormal().copy(
+            green = mix(RUBY, PLUM, 0.45f),
+            pink = PLUM,
+            glow = mix(RUBY, PLUM, 0.35f),
         )
 
         /** The error color: amber, so it never clashes with a red orb (such as the ruby-red option). */

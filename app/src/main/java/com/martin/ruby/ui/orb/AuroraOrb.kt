@@ -52,11 +52,12 @@ fun AuroraOrb(
     modifier: Modifier = Modifier,
     size: Dp = 168.dp,
     speed: Float = 1f,
+    theme: OrbTheme = OrbTheme.AURORA,
     onLongPress: (() -> Unit)? = null,
 ) {
     val density = LocalDensity.current
     val orbPx = with(density) { size.toPx() }
-    val renderer = remember(orbPx) { AuroraRenderer(orbPx) }
+    val renderer = remember(orbPx, theme) { AuroraRenderer(orbPx, theme) }
     val animator = remember { OrbAnimator(state) }
     val currentState by rememberUpdatedState(state)
     val currentLevel by rememberUpdatedState(level)
