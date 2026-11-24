@@ -89,6 +89,7 @@ data class MainActions(
     val onOpenChat: () -> Unit = {},
     val onOpenMemory: () -> Unit = {},
     val onOpenReminders: () -> Unit = {},
+    val onOpenBriefing: () -> Unit = {},
     val onTestGps: () -> Unit = {},
     val onClearLog: () -> Unit = {},
 )
@@ -114,7 +115,7 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
         verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        RubySection(ruby, onOpenChat = actions.onOpenChat)
+        RubySection(ruby, onOpenChat = actions.onOpenChat, onOpenBriefing = actions.onOpenBriefing)
         Spacer(Modifier.height(24.dp))
         HorizontalDivider()
         Spacer(Modifier.height(24.dp))
@@ -225,7 +226,7 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
  * In debug builds a long press on the orb shows each of its states in turn.
  */
 @Composable
-private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit) {
+private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit, onOpenBriefing: () -> Unit) {
     val chat = ruby.chat
     val voice = ruby.voice
     var showVoice by rememberSaveable { mutableStateOf(false) }
@@ -234,6 +235,7 @@ private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit) {
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         if (voice.speaking) TextButton(onClick = ruby.chatActions.onStopSpeaking) { Text("Stop talking") }
+        TextButton(onClick = onOpenBriefing) { Text("Briefing") }
         TextButton(onClick = { showVoice = true }) { Text("Voice and orb") }
     }
     if (voice.prefs.showOrb) {

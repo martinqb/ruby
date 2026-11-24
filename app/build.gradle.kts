@@ -110,9 +110,13 @@ dependencies {
     // unpacking its model download (.tar.bz2).
     implementation(files(sherpaOnnxAar))
     implementation(libs.commons.compress)
+    // The morning briefing's sky: Moon and planets worked out on the phone (MIT license, offline).
+    implementation(libs.astronomy)
     // Chatting with Claude through Anthropic's API.
     implementation(libs.anthropic.java)
     testImplementation(libs.junit)
+    // Android's org.json, for reading weather and Wikipedia answers in unit tests.
+    testImplementation(libs.org.json)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

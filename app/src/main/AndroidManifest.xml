@@ -4,6 +4,8 @@
 
     <!-- Phase 6: backups to the user's own Google Drive. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- To tell whether the phone is online (the briefing's note says "No internet"). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Phase 1: notice when the phone connects to the car. -->
     <!-- Android 12+ asks the user for this one at runtime. -->
@@ -39,6 +41,9 @@
 
     <!-- Voice: hearing the user when they tap Talk. Asked for the first time they do. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- The morning briefing reads today's events. Asked only when the briefing is turned on. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
 
     <!-- Voice: Android 11+ only lets Ruby find the speech recognizer and text-to-speech
          engine if it says it's looking for them. -->
