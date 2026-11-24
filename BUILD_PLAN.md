@@ -125,11 +125,9 @@ The Kokoro on-device voice (step 9) is done too: af_heart is Ruby's default voic
 
 **Status (Nov 24, 2026):** Ruby's orb is done and merged: the main screen opens with an animated orb, styled after the "Aurora Orb" from voiceorbs.vercel.app and rebuilt natively in Compose, with her latest reply and the chat box under it. It shows ready, listening, thinking, speaking, connecting and error, follows Kokoro's real audio level while she speaks, and can be turned off in Voice and orb settings. The error state is amber with a quick double pulse on every color theme, so it's recognizable without relying on color. The orb only animates while visible (stops when scrolled away, in the background or with the screen off); measured on the phone in a release build, about 7% of one CPU core at 20 frames a second while idle. Debug builds show each state with a long press on the orb.
 
-A second color theme, **Ruby** (ruby red and rose on a wine-colored night, thinking leaning plum), is built and phone-tested on the `ruby-red-orb` branch, not merged yet. Aurora stays the default; the choice is in Voice and orb settings.
+The orb has two color themes, chosen in Voice and orb settings: **Aurora** (cyan and violet, the default) and **Ruby** (ruby red and rose on a wine-colored night, thinking leaning plum).
 
-**Next:**
-1. Open the pull request and merge `ruby-red-orb`.
-2. The morning briefing (step 1), spoken in the Kokoro voice.
+**Next:** the morning briefing (step 1), spoken in the Kokoro voice.
 
 Permissions in this phase are sensitive (notifications, Do Not Disturb, health, accessibility). Ask for each one only when its feature is first turned on, with a one-line reason, and list them all on Ruby's privacy screen.
 
