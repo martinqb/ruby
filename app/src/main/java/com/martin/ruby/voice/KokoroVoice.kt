@@ -46,6 +46,17 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
     private val _problem = MutableStateFlow<String?>(null)
     override val problem: StateFlow<String?> = _problem.asStateFlow()
 
+    private val _sounding = MutableStateFlow(false)
+    override val sounding: StateFlow<Boolean> = _sounding.asStateFlow()
+
+    private val _loading = MutableStateFlow(false)
+    override val loading: StateFlow<Boolean> = _loading.asStateFlow()
+
+    /** How loud each slice written to the speaker is, by its place in the stream (for the orb). */
+    private val levels = LevelTrack()
+
+    override fun level(): Float = if (_sounding.value) levels.at(playedFrames()) else 0f
+
     private val modelDir: File = KokoroModel.dir(context.applicationContext)
     private val audio = context.getSystemService(AudioManager::class.java)
     private val attributes = AudioAttributes.Builder()
@@ -128,6 +139,7 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
                     out.flush()
                 }
             }
+            levels.clear()
             finishedLocked()
         }
     }
@@ -207,21 +219,26 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
             stop()
             return null
         }
-        // Read the dictionary (about 0.7 s on the phone) while Kokoro loads (about 0.85 s).
-        var loaded: KokoroPhonemizer? = null
-        var failed: Throwable? = null
-        val reader = Thread({
-            try {
-                loaded = loadPhonemizer(modelDir)
-            } catch (e: Throwable) {
-                failed = e
-            }
-        }, "kokoro-dictionary").apply { start() }
-        val engine = OfflineTts(config = kokoroConfig(modelDir))
-        reader.join()
-        failed?.let { engine.release(); throw it }
-        phonemizer = loaded
-        return engine.also { tts = it }
+        _loading.value = true
+        try {
+            // Read the dictionary (about 0.7 s on the phone) while Kokoro loads (about 0.85 s).
+            var loaded: KokoroPhonemizer? = null
+            var failed: Throwable? = null
+            val reader = Thread({
+                try {
+                    loaded = loadPhonemizer(modelDir)
+                } catch (e: Throwable) {
+                    failed = e
+                }
+            }, "kokoro-dictionary").apply { start() }
+            val engine = OfflineTts(config = kokoroConfig(modelDir))
+            reader.join()
+            failed?.let { engine.release(); throw it }
+            phonemizer = loaded
+            return engine.also { tts = it }
+        } finally {
+            _loading.value = false
+        }
     }
 
     // The player: audio out of the speaker
@@ -277,6 +294,7 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
             out.pause()
             out.flush()
             framesWritten = 0
+            levels.clear()
             playingEpoch = chunk.epoch
         }
         if (out.playState != AudioTrack.PLAYSTATE_PLAYING) out.play()
@@ -288,10 +306,13 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
         while (offset < chunk.samples.size) {
             if (chunk.epoch != epoch.get()) return // stopped: write no more
             val length = minOf(SLICE, chunk.samples.size - offset)
+            // Its loudness is noted before writing: the write waits while the speaker is full.
+            levels.add(framesWritten, framesWritten + length, LevelTrack.levelOf(chunk.samples, offset, length))
             val written = out.write(chunk.samples, offset, length, AudioTrack.WRITE_BLOCKING)
             if (written <= 0) return
             offset += written
             framesWritten += written
+            if (!_sounding.value && chunk.epoch == epoch.get()) _sounding.value = true
         }
     }
 
@@ -368,6 +389,7 @@ class KokoroVoice(context: Context, private val speaker: KokoroSpeaker) : RubyVo
 
     /** Call with [state] held. */
     private fun finishedLocked() {
+        _sounding.value = false
         if (_speaking.value) {
             _speaking.value = false
             audio.abandonAudioFocusRequest(focus)

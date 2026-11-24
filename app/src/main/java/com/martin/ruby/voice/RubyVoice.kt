@@ -1,6 +1,7 @@
 package com.martin.ruby.voice
 
 import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** How Ruby's voice sounds. 1.0 is the engine's normal speed or pitch. */
@@ -21,6 +22,21 @@ interface RubyVoice {
     /** Why the voice can't speak (e.g. no text-to-speech engine), or null if it can. */
     val problem: StateFlow<String?>
 
+    /**
+     * True while she can actually be heard, not while her first words are still being made.
+     * A voice that can't tell uses [speaking].
+     */
+    val sounding: StateFlow<Boolean> get() = speaking
+
+    /** True while the voice itself is loading (Kokoro's model, about a second). */
+    val loading: StateFlow<Boolean> get() = NOT_LOADING
+
+    /**
+     * How loud what's coming out of the speaker is right now, 0..1, or -1 if this voice can't
+     * tell. Called every frame from the main thread, so it must be quick.
+     */
+    fun level(): Float = -1f
+
     /** Speaks [text] after whatever is already queued. */
     fun say(text: String)
 
@@ -37,6 +53,10 @@ interface RubyVoice {
 
     /** Frees the engine. The voice can't be used afterwards. */
     fun close()
+
+    private companion object {
+        val NOT_LOADING: StateFlow<Boolean> = MutableStateFlow(false)
+    }
 }
 
 /** The voices Ruby can use. A custom voice adds an entry here and a case in [create]. */

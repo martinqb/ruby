@@ -52,6 +52,7 @@ import com.martin.ruby.ui.MainUiState
 import com.martin.ruby.ui.MemoryScreen
 import com.martin.ruby.ui.PlacesScreen
 import com.martin.ruby.ui.RemindersScreen
+import com.martin.ruby.ui.RubyUi
 import com.martin.ruby.ui.SummariesScreen
 import com.martin.ruby.memory.Summaries
 import com.martin.ruby.reminders.ReminderStore
@@ -167,6 +168,30 @@ class MainActivity : ComponentActivity() {
                     ) Screen.MEMORY else Screen.MAIN
                 }
 
+                // The same on the chat screen and the main screen's chat box.
+                val chatActions = remember {
+                    ChatActions(
+                        onSend = { text -> ChatSession.send(applicationContext, text) },
+                        onSaveKey = { key -> ChatSession.saveKey(applicationContext, key) },
+                        onForgetKey = { ChatSession.forgetKey(applicationContext) },
+                        onNewConversation = ChatSession::newConversation,
+                        onDismissError = ChatSession::dismissError,
+                        onTalk = ::listen,
+                        onAllowMic = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                        onDoneTalking = VoiceSession::finishListening,
+                        onCancelTalking = VoiceSession::cancelListening,
+                        onDismissNote = VoiceSession::dismissNote,
+                        onPlay = VoiceSession::play,
+                        onStopSpeaking = VoiceSession::stopSpeaking,
+                        onSaveVoice = { prefs -> VoiceSession.save(applicationContext, prefs) },
+                        onTestVoice = {
+                            VoiceSession.play("Hello. I'm Ruby. This is how I sound right now.")
+                        },
+                        onDownloadKokoro = { KokoroModel.download(applicationContext) },
+                        onCancelKokoro = { KokoroModel.cancelDownload(applicationContext) },
+                    )
+                }
+
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     val modifier = Modifier.padding(innerPadding)
                     when (screen) {
@@ -192,27 +217,7 @@ class MainActivity : ComponentActivity() {
                             voice = voice,
                             hasMicPermission = hasMicPermission,
                             context = context?.state?.label,
-                            actions = ChatActions(
-                                onSend = { text -> ChatSession.send(applicationContext, text) },
-                                onSaveKey = { key -> ChatSession.saveKey(applicationContext, key) },
-                                onForgetKey = { ChatSession.forgetKey(applicationContext) },
-                                onNewConversation = ChatSession::newConversation,
-                                onDismissError = ChatSession::dismissError,
-                                onTalk = ::listen,
-                                onAllowMic = { micLauncher.launch(Manifest.permission.RECORD_AUDIO) },
-                                onDoneTalking = VoiceSession::finishListening,
-                                onCancelTalking = VoiceSession::cancelListening,
-                                onDismissNote = VoiceSession::dismissNote,
-                                onPlay = VoiceSession::play,
-                                onStopSpeaking = VoiceSession::stopSpeaking,
-                                onSaveVoice = { prefs -> VoiceSession.save(applicationContext, prefs) },
-                                onTestVoice = {
-                                    VoiceSession.play("Hello. I'm Ruby. This is how I sound right now.")
-                                },
-                                onDownloadKokoro = { KokoroModel.download(applicationContext) },
-                                onCancelKokoro = { KokoroModel.cancelDownload(applicationContext) },
-                                onBack = { screen = Screen.MAIN },
-                            ),
+                            actions = chatActions.copy(onBack = { screen = Screen.MAIN }),
                             modifier = modifier,
                         )
 
@@ -301,6 +306,13 @@ class MainActivity : ComponentActivity() {
                                 onClearLog = SensingLog::clear,
                             ),
                             modifier = modifier,
+                            ruby = RubyUi(
+                                chat = chat,
+                                voice = voice,
+                                hasMicPermission = hasMicPermission,
+                                chatActions = chatActions,
+                                liveLevel = VoiceSession::liveLevel,
+                            ),
                         )
                     }
                 }

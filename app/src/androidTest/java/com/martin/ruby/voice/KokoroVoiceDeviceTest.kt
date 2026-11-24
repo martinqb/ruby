@@ -77,6 +77,32 @@ class KokoroVoiceDeviceTest {
     }
 
     @Test
+    fun theOrbsLevel_followsHerVoice() {
+        val v = ready()
+        assertFalse(v.sounding.value)
+        // Loading the model shows as "loading" (the orb's connecting state), then she's heard.
+        v.say("Neptune is the eighth planet from the Sun. It has the fastest winds in the solar system.")
+        assertTrue("Should be loading first", waitUntil(2_000) { v.loading.value || v.sounding.value })
+        assertTrue("She should be heard", waitUntil(15_000) { v.sounding.value })
+        assertFalse(v.loading.value)
+        // Sample the level as the orb does, every frame or so, until she stops.
+        val levels = mutableListOf<Float>()
+        while (v.speaking.value) {
+            levels += v.level()
+            Thread.sleep(16)
+        }
+        assertFalse("Not heard once finished", v.sounding.value)
+        assertEquals(0f, v.level())
+        val sorted = levels.sorted()
+        fun pct(p: Int) = sorted[(sorted.size - 1) * p / 100]
+        log("Orb level: ${levels.size} samples; 10%% %.2f, median %.2f, 90%% %.2f, max %.2f".format(pct(10), pct(50), pct(90), sorted.last()))
+        // It moves with her voice: loud on words, low in the pauses between them.
+        assertTrue("Loud while she talks: 90% ${pct(90)}", pct(90) > 0.6f)
+        assertTrue("Quieter in pauses: 10% ${pct(10)}", pct(10) < 0.45f)
+        assertTrue("Never above 1", sorted.last() <= 1f)
+    }
+
+    @Test
     fun stop_silencesAtOnce_andTheNextLineStartsClean() {
         val v = ready()
         val long = "This is a long reply that goes on for quite a while, so that there is plenty of audio " +
