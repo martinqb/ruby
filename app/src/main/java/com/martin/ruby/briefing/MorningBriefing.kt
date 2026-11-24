@@ -10,6 +10,12 @@ import com.martin.ruby.ai.AiEngine
 import com.martin.ruby.ai.AiSettings
 import com.martin.ruby.ai.FreeMode
 import com.martin.ruby.chat.ApiKeyStore
+import com.martin.ruby.radio.Radio
+import com.martin.ruby.radio.RadioCommands
+import com.martin.ruby.radio.RadioSettings
+import com.martin.ruby.radio.Stations
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import com.martin.ruby.data.PlaceStore
 import com.martin.ruby.data.dataStore
 import com.martin.ruby.log.SensingLog
@@ -145,7 +151,9 @@ object MorningBriefing {
                 SensingLog.add("Briefing: stopped before it was spoken.")
                 return
             }
+            val spokeAt = SystemClock.elapsedRealtime()
             VoiceSession.speakWhenReady(app, text, what = "Morning briefing")
+            if (!foreground) scope.launch { radioAfter(app, spokeAt) }
             val note = BriefingText.note(how, tookMs, briefing.words, facts.notes, online)
             SensingLog.add("Briefing: $note")
             app.dataStore.edit {
@@ -272,6 +280,23 @@ object MorningBriefing {
         } catch (e: BriefingWriter.Failed) {
             BriefingText.plain(facts) to "Plain briefing (${e.message?.trimEnd('.')})"
         }
+    }
+
+    /**
+     * In the car, once she's finished: the radio, if that's on (off by default), and not if the
+     * user stopped her partway.
+     */
+    private suspend fun radioAfter(app: Context, spokeAt: Long) {
+        if (!RadioSettings(app).startsAfterBriefing()) return
+        // Wait for her to start, then to finish (at most a few minutes).
+        withTimeoutOrNull(30_000) { VoiceSession.ui.first { it.speaking } }
+        withTimeoutOrNull(4 * 60_000L) { VoiceSession.ui.first { !it.speaking } } ?: return
+        val stopped = VoiceSession.lastStoppedAt >= spokeAt
+        if (!RadioCommands.startAfterBriefing(enabled = true, inCar = true, stoppedByUser = stopped)) {
+            SensingLog.add("Briefing: not starting the radio (she was stopped).")
+            return
+        }
+        withContext(Dispatchers.Main) { Radio.play(app, Stations.DEFAULT) }
     }
 
     /** The briefing written by Gemini Nano on the phone. Throws [FreeMode.Failed]. */

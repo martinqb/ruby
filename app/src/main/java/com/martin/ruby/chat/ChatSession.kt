@@ -14,6 +14,9 @@ import com.martin.ruby.memory.MemoryMessage
 import com.martin.ruby.memory.MemoryRecall
 import com.martin.ruby.memory.MemoryStore
 import com.martin.ruby.data.PlaceStore
+import com.martin.ruby.radio.Radio
+import com.martin.ruby.radio.RadioCommand
+import com.martin.ruby.radio.RadioCommands
 import com.martin.ruby.reminders.ReminderStore
 import com.martin.ruby.reminders.ReminderText
 import com.martin.ruby.reminders.ReminderTools
@@ -151,6 +154,17 @@ object ChatSession {
 
         scope.launch {
             val memory = MemoryStore(appContext)
+            // Radio commands are done on the phone, in either engine, without asking any AI.
+            RadioCommands.parse(message, Radio.state.value.on)?.let { command ->
+                saveToMemory(memory, MemoryMessage.ROLE_USER, message)
+                val reply = when (command) {
+                    is RadioCommand.Play -> Radio.play(appContext, command.station)
+                    RadioCommand.Stop -> Radio.stop(appContext)
+                }
+                _ui.update { it.copy(turns = it.turns + ChatTurn(fromUser = false, text = reply), sending = false, replying = null) }
+                saveToMemory(memory, MemoryMessage.ROLE_RUBY, reply)
+                return@launch
+            }
             // Look before saving the new message, so it doesn't find itself.
             val memories = recall(memory, message)
             saveToMemory(memory, MemoryMessage.ROLE_USER, message)

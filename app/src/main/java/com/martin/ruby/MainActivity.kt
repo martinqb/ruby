@@ -30,6 +30,9 @@ import com.martin.ruby.ai.AiEngine
 import com.martin.ruby.ai.AiSettings
 import com.martin.ruby.ai.FreeMode
 import com.martin.ruby.backup.BackupManager
+import com.martin.ruby.radio.Radio
+import com.martin.ruby.radio.RadioSettings
+import com.martin.ruby.ui.RadioActions
 import com.martin.ruby.backup.BackupStatusStore
 import com.martin.ruby.backup.NightlyBackup
 import com.martin.ruby.bluetooth.CarBluetooth
@@ -167,6 +170,8 @@ class MainActivity : ComponentActivity() {
                 val voice by VoiceSession.ui.collectAsState()
                 val briefing by remember { MorningBriefing.state(applicationContext) }.collectAsState(initial = BriefingState())
                 val briefingWorking by MorningBriefing.working.collectAsState()
+                val radio by Radio.state.collectAsState()
+                val radioAfterBriefing by remember { RadioSettings(applicationContext).startAfterBriefing }.collectAsState(initial = false)
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
                 if (openStorageRequested) {
                     openStorageRequested = false
@@ -363,6 +368,14 @@ class MainActivity : ComponentActivity() {
                                 hasMicPermission = hasMicPermission,
                                 chatActions = chatActions,
                                 liveLevel = VoiceSession::liveLevel,
+                                radio = radio,
+                                radioAfterBriefing = radioAfterBriefing,
+                                radioActions = RadioActions(
+                                    onPlay = { Radio.play(applicationContext, it) },
+                                    onStop = { Radio.stop(applicationContext) },
+                                    onOpenInIHeart = { Radio.openInIHeart(applicationContext, it) },
+                                    onAfterBriefing = { on -> lifecycleScope.launch { RadioSettings(applicationContext).setStartAfterBriefing(on) } },
+                                ),
                             ),
                         )
                     }

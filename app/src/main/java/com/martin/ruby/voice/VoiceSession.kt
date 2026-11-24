@@ -161,7 +161,12 @@ object VoiceSession {
         }
     }
 
+    /** When she was last stopped (Stop talking, the steering wheel...), elapsedRealtime. */
+    @Volatile var lastStoppedAt = 0L
+        private set
+
     fun stopSpeaking() {
+        lastStoppedAt = SystemClock.elapsedRealtime()
         chunker = null
         voice?.stop()
         _ui.update { it.copy(readingReply = false) }
