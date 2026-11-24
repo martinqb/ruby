@@ -19,7 +19,22 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import com.martin.ruby.BuildConfig
+import com.martin.ruby.chat.ChatUi
+import com.martin.ruby.ui.orb.AuroraOrb
+import com.martin.ruby.ui.orb.OrbState
+import com.martin.ruby.ui.orb.orbStateFor
+import com.martin.ruby.voice.VoiceUi
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
@@ -75,17 +90,31 @@ data class MainActions(
     val onClearLog: () -> Unit = {},
 )
 
-/** The home screen: what Ruby senses at the top, setup below. */
+/** Ruby herself on the main screen: her orb, her latest reply and the chat box. */
+data class RubyUi(
+    val chat: ChatUi = ChatUi(),
+    val voice: VoiceUi = VoiceUi(),
+    val hasMicPermission: Boolean = false,
+    val chatActions: ChatActions = ChatActions(),
+    /** The live audio level for the orb (see VoiceSession.liveLevel). */
+    val liveLevel: () -> Float = { -1f },
+)
+
+/** The home screen: Ruby's orb and chat box first, then what she senses, then setup. */
 @Composable
-fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Modifier) {
+fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Modifier, ruby: RubyUi = RubyUi()) {
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        RubySection(ruby, onOpenChat = actions.onOpenChat)
+        Spacer(Modifier.height(24.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(24.dp))
         ContextHeadline(state)
         Spacer(Modifier.height(8.dp))
         Text(
@@ -99,9 +128,6 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
             Spacer(Modifier.height(16.dp))
             LocationInfo(state)
         }
-        Spacer(Modifier.height(24.dp))
-        // Chat needs no sensing permissions, so it's offered before them.
-        Button(onClick = actions.onOpenChat) { Text("Chat with Ruby") }
         Spacer(Modifier.height(32.dp))
 
         if (!state.hasBluetoothPermission) {
@@ -190,6 +216,78 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
         SensingLogSection(state, actions)
     }
 }
+
+/**
+ * The orb (if it's on), what it's showing in words, Ruby's latest reply, and the chat box.
+ * In debug builds a long press on the orb shows each of its states in turn.
+ */
+@Composable
+private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit) {
+    val chat = ruby.chat
+    val voice = ruby.voice
+    var showVoice by rememberSaveable { mutableStateOf(false) }
+    var demo by remember { mutableStateOf<OrbState?>(null) }
+    val shown = demo ?: orbStateFor(chat, voice)
+
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        if (voice.speaking) TextButton(onClick = ruby.chatActions.onStopSpeaking) { Text("Stop talking") }
+        TextButton(onClick = { showVoice = true }) { Text("Voice and orb") }
+    }
+    if (voice.prefs.showOrb) {
+        AuroraOrb(
+            state = shown,
+            level = if (demo != null) DEMO_LEVEL else ruby.liveLevel,
+            modifier = Modifier.testTag(ORB_TAG),
+            onLongPress = if (!BuildConfig.DEBUG) null else {
+                { demo = OrbState.entries.getOrNull((demo?.ordinal ?: -1) + 1) }
+            },
+        )
+        Text(
+            shown.label + if (demo != null) " (demo: long-press for the next)" else "",
+            style = MaterialTheme.typography.titleMedium,
+            color = if (shown == OrbState.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        if (shown == OrbState.ERROR && demo == null) {
+            (chat.error ?: voice.problem)?.let { Details(it) }
+        }
+        Spacer(Modifier.height(12.dp))
+    }
+
+    // Her latest reply (the end of it while it's still arriving).
+    val replying = chat.replying
+    val caption = when {
+        replying != null -> replying.ifEmpty { "…" }.let { if (it.length > CAPTION_TAIL) "…" + it.takeLast(CAPTION_TAIL) else it }
+        else -> chat.turns.lastOrNull { !it.fromUser }?.text
+    }
+    Text(
+        caption ?: "Ask Ruby anything: type, or tap Talk.",
+        style = MaterialTheme.typography.bodyLarge,
+        textAlign = TextAlign.Center,
+        maxLines = 6,
+        overflow = TextOverflow.Ellipsis,
+        color = if (caption == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+    )
+    Spacer(Modifier.height(12.dp))
+    when (chat.hasKey) {
+        null -> Unit // still checking
+        false -> Button(onClick = onOpenChat) { Text("Set up chat with Claude") }
+        true -> ChatInput(chat, voice, ruby.hasMicPermission, ruby.chatActions)
+    }
+    TextButton(onClick = onOpenChat) { Text("Full conversation") }
+
+    ChatErrorDialog(chat, ruby.chatActions.onDismissError)
+    if (showVoice) VoiceSettingsDialog(voice, ruby.chatActions, onClose = { showVoice = false })
+}
+
+/** The orb's test tag, for UI tests. */
+const val ORB_TAG = "ruby-orb"
+
+/** How much of a reply still arriving is shown under the orb. */
+private const val CAPTION_TAIL = 280
+
+/** In the demo, each state shows its own made-up motion. */
+private val DEMO_LEVEL: () -> Float = { -1f }
 
 /**
  * The one current state from the decision engine, with why and since when, plus any new

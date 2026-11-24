@@ -1,6 +1,7 @@
 package com.martin.ruby.voice
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -21,6 +22,8 @@ data class VoicePrefs(
     val engine: VoiceEngine = VoiceEngine.KOKORO,
     val kokoroSpeaker: KokoroSpeaker = KokoroSpeaker.HEART,
     val style: VoiceStyle = VoiceStyle(),
+    /** Ruby's animated orb on the main screen. */
+    val showOrb: Boolean = true,
 )
 
 /** Ruby's voice settings, saved with the app's other settings. */
@@ -34,6 +37,7 @@ class VoiceSettings(private val context: Context) {
         val KOKORO_SPEAKER = stringPreferencesKey("voice_kokoro_speaker")
         val SPEED = floatPreferencesKey("voice_speed")
         val PITCH = floatPreferencesKey("voice_pitch")
+        val SHOW_ORB = booleanPreferencesKey("show_orb")
     }
 
     val prefs: Flow<VoicePrefs> = context.dataStore.data.map { p ->
@@ -43,6 +47,7 @@ class VoiceSettings(private val context: Context) {
             kokoroSpeaker = p[Keys.KOKORO_SPEAKER]?.let { name -> KokoroSpeaker.entries.firstOrNull { it.name == name } }
                 ?: KokoroSpeaker.HEART,
             style = VoiceStyle(speed = p[Keys.SPEED] ?: 1.0f, pitch = p[Keys.PITCH] ?: 1.0f),
+            showOrb = p[Keys.SHOW_ORB] ?: true,
         )
     }
 
@@ -53,6 +58,7 @@ class VoiceSettings(private val context: Context) {
             p[Keys.KOKORO_SPEAKER] = prefs.kokoroSpeaker.name
             p[Keys.SPEED] = prefs.style.speed
             p[Keys.PITCH] = prefs.style.pitch
+            p[Keys.SHOW_ORB] = prefs.showOrb
         }
     }
 }

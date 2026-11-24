@@ -20,6 +20,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Switch
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
@@ -139,29 +141,38 @@ fun ChatScreen(
         }
     }
 
+    ChatErrorDialog(ui, actions.onDismissError)
+    if (showVoice) VoiceSettingsDialog(voice, actions, onClose = { showVoice = false })
+}
+
+/** Shown when a reply failed, on whichever screen the chat is on. */
+@Composable
+internal fun ChatErrorDialog(ui: ChatUi, onDismiss: () -> Unit) {
     ui.error?.let { error ->
         AlertDialog(
-            onDismissRequest = actions.onDismissError,
+            onDismissRequest = onDismiss,
             title = { Text("Ruby couldn't answer") },
             text = { Text(error) },
-            confirmButton = { TextButton(onClick = actions.onDismissError) { Text("OK") } },
+            confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
         )
     }
+}
 
-    if (showVoice) {
-        val appContext = LocalContext.current.applicationContext
-        val kokoroFlow = remember { KokoroModel.state(appContext) }
-        val kokoro by kokoroFlow.collectAsState(initial = KokoroModel.State.NotInstalled)
-        VoiceDialog(
-            voice = voice,
-            kokoro = kokoro,
-            onSave = actions.onSaveVoice,
-            onTest = actions.onTestVoice,
-            onDownloadKokoro = actions.onDownloadKokoro,
-            onCancelKokoro = actions.onCancelKokoro,
-            onClose = { showVoice = false },
-        )
-    }
+/** Ruby's voice and orb settings. */
+@Composable
+internal fun VoiceSettingsDialog(voice: VoiceUi, actions: ChatActions, onClose: () -> Unit) {
+    val appContext = LocalContext.current.applicationContext
+    val kokoroFlow = remember { KokoroModel.state(appContext) }
+    val kokoro by kokoroFlow.collectAsState(initial = KokoroModel.State.NotInstalled)
+    VoiceDialog(
+        voice = voice,
+        kokoro = kokoro,
+        onSave = actions.onSaveVoice,
+        onTest = actions.onTestVoice,
+        onDownloadKokoro = actions.onDownloadKokoro,
+        onCancelKokoro = actions.onCancelKokoro,
+        onClose = onClose,
+    )
 }
 
 @Composable
@@ -173,8 +184,6 @@ private fun Conversation(
     actions: ChatActions,
     modifier: Modifier,
 ) {
-    var draft by rememberSaveable { mutableStateOf("") }
-    var explainMic by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val itemCount = ui.turns.size + if (ui.replying != null) 1 else 0
 
@@ -209,6 +218,17 @@ private fun Conversation(
     }
 
     Spacer(Modifier.height(8.dp))
+    ChatInput(ui, voice, hasMicPermission, actions)
+}
+
+/**
+ * The chat box: type and Send, or tap Talk and speak; while listening, what's heard so far
+ * with Done and Cancel. Used on the chat screen and under Ruby's orb on the main screen.
+ */
+@Composable
+internal fun ChatInput(ui: ChatUi, voice: VoiceUi, hasMicPermission: Boolean, actions: ChatActions) {
+    var draft by rememberSaveable { mutableStateOf("") }
+    var explainMic by remember { mutableStateOf(false) }
     if (voice.listening) {
         Listening(voice, actions)
         return
@@ -357,7 +377,7 @@ private fun VoiceDialog(
 
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text("Ruby's voice") },
+        title = { Text("Ruby's voice and orb") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("Read replies aloud", style = MaterialTheme.typography.titleSmall)
@@ -397,6 +417,26 @@ private fun VoiceDialog(
                 }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(onClick = onTest) { Text("Test voice") }
+
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .toggleable(value = prefs.showOrb, role = Role.Switch) { onSave(prefs.copy(showOrb = it)) },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Show Ruby's orb", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "An animated orb on the main screen that shows when she's listening, thinking " +
+                                "or talking. It only moves while Ruby is open on screen.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Switch(checked = prefs.showOrb, onCheckedChange = null)
+                }
             }
         },
         confirmButton = { TextButton(onClick = onClose) { Text("Done") } },

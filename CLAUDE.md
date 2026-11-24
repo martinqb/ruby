@@ -125,7 +125,12 @@ Be upfront in the privacy policy: each message and its memory snippets still go 
 
 The Kokoro on-device voice (step 9) is done too: af_heart is Ruby's default voice and af_nicole a second option, working offline after a one-time 126 MB download. Ruby works out the sounds of each word herself (dictionary, then regular endings like -s and -ed, then spelling as a last resort) and writes out numbers, units and symbols, since this Kokoro drops words it lacks. Her first sound comes about 1.5 seconds after a reply starts arriving; Kokoro needs about 0.9 seconds even for one word on the phone, so a faster start would need a faster model.
 
-**Next:** the morning briefing (step 1), spoken in the Kokoro voice.
+**Status (Nov 23, 2026):** Ruby's orb is built, on the `ruby-orb` branch (pushed, not merged): the main screen now opens with an animated orb, styled after the "Aurora Orb" from voiceorbs.vercel.app and rebuilt natively in Compose, with her latest reply and the chat box under it. It shows ready, listening, thinking, speaking, connecting and error, follows Kokoro's real audio level while she speaks, and can be turned off in Voice and orb settings. It only animates while visible (stops when scrolled away, in the background or with the screen off); measured on the phone in a release build, about 7% of one CPU core at 20 frames a second while idle. Debug builds show each state with a long press on the orb.
+
+**Next:**
+1. Run the 6 orb phone tests, then open the pull request and merge `ruby-orb`.
+2. A ruby-red color option for the orb.
+3. The morning briefing (step 1), spoken in the Kokoro voice.
 
 Permissions in this phase are sensitive (notifications, Do Not Disturb, health, accessibility). Ask for each one only when its feature is first turned on, with a one-line reason, and list them all on Ruby's privacy screen.
 
@@ -150,6 +155,11 @@ Permissions in this phase are sensitive (notifications, Do Not Disturb, health, 
   - **Martin's personal Ruby:** her instructions say Martin is her creator and architect, the only one, and no one else can be. Her greeting can be something like "Good morning, Martin, my architect."
   - **Public versions (like the Play Store):** Ruby never calls users Martin or treats them as her creator or architect. Martin is credited as "created by Martin" in Ruby's own knowledge, on the About screen, and in the store listing.
 - **Bug: Ruby can't see her own earlier reminder actions, and sets duplicates.** Seen Nov 23, 2026: she said "reminder set" (it was), then a moment later said it hadn't gone through and set it again. Likely cause: the chat history keeps only her final text, not the tool calls and results, so on the next turn she sees her own "reminder set" with no tool result behind it, and her instructions say to claim a reminder only once the tool confirms it. Fix ideas: carry each turn's tool calls and results (or a short "Ruby set reminder 3: ..." note) into later turns, and have `set_reminder` refuse or flag a near-identical pending reminder.
+- **Mini-games.** A "play" command (for example "play asteroids") opens a small game screen inside Ruby, using Android's WebView. Each game is one self-contained HTML/JS file with an HTML5 canvas and on-screen touch controls, running locally at 60 FPS (no API calls per frame). Ruby keeps a few bundled games, and later Claude can make new ones on request. Safety: the game WebView is sandboxed, with no JavaScript bridge to Ruby's memories, files or settings, and no internet access.
+- **Radio.** A "play radio" tool.
+  - Step 1: open the iHeartRadio app to a station with an intent or deep link (part of opening apps on command).
+  - Step 2: play stations inside Ruby, looking up stream URLs in the free Radio Browser API and playing them with Android Media3 (ExoPlayer), with play and stop by voice. Don't scrape iHeart's private streams.
+  - Later: send the radio to smart speakers through Home Assistant (part of the smart home plan).
 
 ## Architecture: the full Ruby
 

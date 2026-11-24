@@ -35,6 +35,9 @@ interface RubyEars {
     /** True if recognition happens on the phone, so audio isn't sent anywhere. */
     val onDevice: Boolean
 
+    /** How loud the user is right now while listening, 0..1, or -1 if unknown. Main thread. */
+    val level: Float get() = -1f
+
     /** Listens until the user stops talking. Needs the RECORD_AUDIO permission. */
     fun listen(listener: Listener)
 
@@ -56,6 +59,9 @@ class AndroidSpeechEars(context: Context) : RubyEars {
 
     private val appContext = context.applicationContext
     private var recognizer: SpeechRecognizer? = null
+
+    override var level = -1f
+        private set
 
     /** Set when the on-device recognizer failed for want of a language model; then use the default. */
     private var onDeviceFailed = false
@@ -107,9 +113,17 @@ class AndroidSpeechEars(context: Context) : RubyEars {
                 listener.onError(describe(error))
             }
 
-            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onReadyForSpeech(params: Bundle?) {
+                level = 0f
+            }
+
             override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
+
+            // Recognizers report roughly -2 dB (quiet) to 10 dB (loud speech).
+            override fun onRmsChanged(rmsdB: Float) {
+                level = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+            }
+
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -137,6 +151,7 @@ class AndroidSpeechEars(context: Context) : RubyEars {
     private fun done() {
         recognizer?.destroy()
         recognizer = null
+        level = -1f
     }
 
     private fun best(bundle: Bundle): String? =

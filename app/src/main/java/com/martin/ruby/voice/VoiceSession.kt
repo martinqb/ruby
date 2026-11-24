@@ -32,6 +32,12 @@ data class VoiceUi(
      */
     val usingEngine: VoiceEngine? = null,
     val canListen: Boolean = true,
+    /** True once her voice can actually be heard (not while the first words are being made). */
+    val sounding: Boolean = false,
+    /** True while the voice itself is loading. */
+    val loading: Boolean = false,
+    /** True while a reply is being read aloud as it arrives. */
+    val readingReply: Boolean = false,
     /** True if speech recognition happens on the phone. */
     val listensOnDevice: Boolean = true,
 )
@@ -90,6 +96,7 @@ object VoiceSession {
         voice?.stop()
         chunker = if (speak) SpeechChunker() else null
         replyArrived = false
+        _ui.update { it.copy(readingReply = speak) }
     }
 
     /** Whether this reply's first words have arrived yet (for timing the first sound). */
@@ -110,6 +117,7 @@ object VoiceSession {
     fun replyFinished() = onMain {
         chunker?.finish()?.forEach { voice?.say(it) }
         chunker = null
+        _ui.update { it.copy(readingReply = false) }
     }
 
     /** The reply failed; if it was being spoken, say why instead. */
@@ -119,6 +127,7 @@ object VoiceSession {
             voice?.say(if (message.startsWith("Sorry")) message else "Sorry. $message")
         }
         chunker = null
+        _ui.update { it.copy(readingReply = false) }
     }
 
     /** Reads [text] aloud now, e.g. the Play button on a reply. */
@@ -132,6 +141,20 @@ object VoiceSession {
     fun stopSpeaking() {
         chunker = null
         voice?.stop()
+        _ui.update { it.copy(readingReply = false) }
+    }
+
+    /**
+     * How loud things are right now, for the orb: the user while listening, Ruby while she
+     * can be heard, else -1 (none). Main thread; called every frame.
+     */
+    fun liveLevel(): Float {
+        val ui = _ui.value
+        return when {
+            ui.listening -> ears?.level ?: -1f
+            ui.speaking && ui.sounding -> voice?.level() ?: -1f
+            else -> -1f
+        }
     }
 
     /** Listens once; [onHeard] gets what the user said. Needs the microphone permission. */
@@ -187,6 +210,8 @@ object VoiceSession {
             voiceWatch = scope.launch {
                 launch { v.speaking.collect { s -> _ui.update { it.copy(speaking = s) } } }
                 launch { v.problem.collect { p -> _ui.update { it.copy(problem = p) } } }
+                launch { v.sounding.collect { s -> _ui.update { it.copy(sounding = s) } } }
+                launch { v.loading.collect { l -> _ui.update { it.copy(loading = l) } } }
             }
         }
         voice?.setStyle(prefs.style)
