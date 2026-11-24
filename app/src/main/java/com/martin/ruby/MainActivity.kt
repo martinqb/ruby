@@ -42,7 +42,13 @@ import com.martin.ruby.memory.MemoryStore
 import com.martin.ruby.motion.MotionSensor
 import com.martin.ruby.motion.MotionStatus
 import com.martin.ruby.sensing.BackgroundSensing
+import com.martin.ruby.briefing.BriefingState
+import com.martin.ruby.briefing.CalendarReader
+import com.martin.ruby.briefing.MorningBriefing
 import com.martin.ruby.ui.BackupScreen
+import com.martin.ruby.ui.BriefingActions
+import com.martin.ruby.ui.BriefingScreen
+import com.martin.ruby.ui.BriefingSetup
 import com.martin.ruby.ui.CarPickerScreen
 import com.martin.ruby.ui.ChatActions
 import com.martin.ruby.ui.ChatScreen
@@ -65,7 +71,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Which screen is showing. */
-private enum class Screen { MAIN, CHAT, REMINDERS, SUMMARIES, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT }
+private enum class Screen { MAIN, CHAT, REMINDERS, SUMMARIES, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT, BRIEFING }
 
 class MainActivity : ComponentActivity() {
 
@@ -80,6 +86,7 @@ class MainActivity : ComponentActivity() {
     private var hasLocationPermission by mutableStateOf(false)
     private var hasBackgroundLocation by mutableStateOf(false)
     private var hasMicPermission by mutableStateOf(false)
+    private var hasCalendarPermission by mutableStateOf(false)
     private var gpsEnabled by mutableStateOf(true)
     private var batteryOptimized by mutableStateOf(false)
     private var savingPlace by mutableStateOf(false)
@@ -99,6 +106,13 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             hasMicPermission = granted
             if (granted) listen()
+        }
+
+    /** Asked when the briefing (with today's calendar) is turned on. */
+    private val calendarLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            hasCalendarPermission = granted
+            SensingLog.add("Briefing: calendar access ${if (granted) "allowed" else "not allowed"}.")
         }
 
     private val permissionLauncher =
@@ -148,6 +162,8 @@ class MainActivity : ComponentActivity() {
                 val log by SensingLog.entries.collectAsState()
                 val chat by ChatSession.ui.collectAsState()
                 val voice by VoiceSession.ui.collectAsState()
+                val briefing by remember { MorningBriefing.state(applicationContext) }.collectAsState(initial = BriefingState())
+                val briefingWorking by MorningBriefing.working.collectAsState()
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
                 if (openStorageRequested) {
                     openStorageRequested = false
@@ -218,6 +234,24 @@ class MainActivity : ComponentActivity() {
                             hasMicPermission = hasMicPermission,
                             context = context?.state?.label,
                             actions = chatActions.copy(onBack = { screen = Screen.MAIN }),
+                            modifier = modifier,
+                        )
+
+                        Screen.BRIEFING -> BriefingScreen(
+                            state = briefing,
+                            setup = BriefingSetup(
+                                hasCar = car != null,
+                                hasHome = places.any { it.name.equals("home", ignoreCase = true) },
+                                hasCalendar = hasCalendarPermission,
+                                working = briefingWorking,
+                            ),
+                            actions = BriefingActions(
+                                onEnable = { MorningBriefing.setEnabled(applicationContext, it) },
+                                onProfile = { MorningBriefing.saveProfile(applicationContext, it) },
+                                onHearNow = { MorningBriefing.speakNow(applicationContext) },
+                                onAllowCalendar = { calendarLauncher.launch(Manifest.permission.READ_CALENDAR) },
+                                onBack = { screen = Screen.MAIN },
+                            ),
                             modifier = modifier,
                         )
 
@@ -302,6 +336,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenChat = { screen = Screen.CHAT },
                                 onOpenMemory = { screen = Screen.MEMORY },
                                 onOpenReminders = { screen = Screen.REMINDERS },
+                                onOpenBriefing = { screen = Screen.BRIEFING },
                                 onTestGps = { BackgroundSensing.testGps(this) },
                                 onClearLog = SensingLog::clear,
                             ),
@@ -345,6 +380,7 @@ class MainActivity : ComponentActivity() {
         batteryOptimized = BackgroundSensing.isBatteryOptimized(this)
         hasMicPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
+        hasCalendarPermission = CalendarReader.hasPermission(this)
     }
 
     /** Listens once, and sends what the user said; the reply may then be read aloud. */

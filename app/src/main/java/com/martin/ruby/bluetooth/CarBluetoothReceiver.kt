@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.IntentCompat
+import com.martin.ruby.briefing.MorningBriefing
 import com.martin.ruby.data.CarSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +39,8 @@ class CarBluetoothReceiver : BroadcastReceiver() {
                 val car = settings.car.first()
                 if (car != null && device.address == car.address) {
                     settings.setCarConnected(connected)
+                    // The first time each morning: the briefing (it checks the rest itself).
+                    if (connected) MorningBriefing.carConnected(context)
                 }
             } finally {
                 pending.finish()

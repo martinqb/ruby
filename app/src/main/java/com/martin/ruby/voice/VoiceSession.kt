@@ -13,7 +13,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** What the screen shows about Ruby's voice and ears. */
 data class VoiceUi(
@@ -136,6 +139,16 @@ object VoiceSession {
         voice?.stop()
         val c = SpeechChunker()
         (c.feed(text) + c.finish()).forEach { voice?.say(it) }
+    }
+
+    /**
+     * Speaks [text] from anywhere, even with Ruby's screen closed (the morning briefing):
+     * starts the voice if it isn't yet, waits for it, then speaks.
+     */
+    suspend fun speakWhenReady(context: Context, text: String) {
+        withContext(Dispatchers.Main) { start(context) }
+        withTimeoutOrNull(10_000) { ui.first { it.usingEngine != null } }
+        withContext(Dispatchers.Main) { play(text) }
     }
 
     fun stopSpeaking() {

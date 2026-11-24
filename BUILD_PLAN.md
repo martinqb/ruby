@@ -127,7 +127,11 @@ The Kokoro on-device voice (step 9) is done too: af_heart is Ruby's default voic
 
 The orb has two color themes, chosen in Voice and orb settings: **Aurora** (cyan and violet, the default) and **Ruby** (ruby red and rose on a wine-colored night, thinking leaning plum).
 
-**Next:** the morning briefing (step 1), spoken in the Kokoro voice.
+**Status (Nov 24, 2026):** the morning briefing (step 1) is built on the `morning-briefing` branch, not merged yet. The first time the car connects each morning (4 AM to noon), Ruby speaks a briefing in her Kokoro voice, under 2 minutes (260 words at most), made of segments each user turns on or off on the Briefing screen: a greeting that changes daily, today at a glance (weather for the drive and the day from Open-Meteo, calendar, reminders), an interest (so far tonight's sky: moon, planets and clear-sky chance, worked out on the phone with Astronomy Engine), music on this day (from Wikipedia's On this day feed), a heads-up worked out from the forecast and calendar, and a sign-off. Claude writes it; without Claude she speaks a plain version made on the phone. Each one is saved to memory. New profiles start with everything on but the interest; Martin's profile (with tonight's sky) is stored on his phone. Phone tests 1 to 8 passed (Claude wrote it in 7.5 s, 195 words, about 65 s).
+
+**Next:**
+1. The real car test (test 9), then open the pull request and merge `morning-briefing`.
+2. The AI engine switch (see the to-do list): start by checking that Gemini Nano is available on the phone.
 
 Permissions in this phase are sensitive (notifications, Do Not Disturb, health, accessibility). Ask for each one only when its feature is first turned on, with a one-line reason, and list them all on Ruby's privacy screen.
 
@@ -157,6 +161,7 @@ Permissions in this phase are sensitive (notifications, Do Not Disturb, health, 
   - Step 1: open the iHeartRadio app to a station with an intent or deep link (part of opening apps on command).
   - Step 2: play stations inside Ruby, looking up stream URLs in the free Radio Browser API and playing them with Android Media3 (ExoPlayer), with play and stop by voice. Don't scrape iHeart's private streams.
   - Later: send the radio to smart speakers through Home Assistant (part of the smart home plan).
+- **AI engine switch (planned; next after the morning briefing).** A setting to choose who writes Ruby's words: **Claude** (current) or **Free mode**, Gemini Nano running on the phone through Android AICore / ML Kit GenAI (free, offline, private). Martin's Galaxy S26 Ultra has AICore installed; check in the app that the model is actually available before offering it. If it isn't, or a request fails, fall back to Claude and say so. The chat and the briefing (and maybe nightly summaries) work with either engine. Decided (Nov 24, 2026): with Claude chosen, everything uses Claude, including reminders and nightly summaries; Free mode's rules apply only when Free mode is chosen. Martin's profile stays on Claude. In Free mode, nightly summaries use Free mode too. Nano can't use tools, so Free mode tries simple reminders itself (Nano turns the request into a structured reminder, which the phone checks before saving); if it can't, Ruby asks before using Claude for that request, and only offers that when a Claude key is set. Reminders are never handed to Claude automatically. Under the switch, a short helper line: "Free mode uses the AI built into your phone: private, offline, no cost. Want Ruby at her smartest? Switch to Claude (needs your own API key)." On phones without Gemini Nano, say Free mode isn't available on this phone instead.
 
 ## Architecture: the full Ruby
 

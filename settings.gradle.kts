@@ -19,6 +19,12 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Astronomy Engine (the morning briefing's sky) is published only on JitPack, which
+        // builds it from the project's GitHub release. Only that library may come from here.
+        exclusiveContent {
+            forRepository { maven("https://jitpack.io") }
+            filter { includeModule("com.github.cosinekitty", "astronomy") }
+        }
     }
 }
 
