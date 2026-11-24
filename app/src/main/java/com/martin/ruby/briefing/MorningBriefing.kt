@@ -122,13 +122,13 @@ object MorningBriefing {
         try {
             val started = SystemClock.elapsedRealtime()
             val state = state(app).first()
+            val online = Connection.isOnline(app)
             val facts = gather(app, state)
             val (briefing, how) = write(app, facts)
             val text = briefing.text
             val tookMs = SystemClock.elapsedRealtime() - started
-            VoiceSession.speakWhenReady(app, text)
-            val note = "$how in ${tookMs / 100 / 10.0} s; ${briefing.words} words, about " +
-                "${BriefingText.seconds(briefing.words)} s." + facts.notes.joinToString("") { " $it" }
+            VoiceSession.speakWhenReady(app, text, what = "Morning briefing")
+            val note = BriefingText.note(how, tookMs, briefing.words, facts.notes, online)
             SensingLog.add("Briefing: $note")
             app.dataStore.edit {
                 it[Keys.LAST_TEXT] = text

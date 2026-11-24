@@ -127,6 +127,23 @@ class BriefingTextTest {
     }
 
     @Test
+    fun theLastBriefingNote_keepsItsWording_andSaysNoInternetAtTheEnd() {
+        val missing = listOf("No weather: Unable to resolve host \"api.open-meteo.com\".", "No music on this day: Wikipedia couldn't be reached.")
+        val offline = BriefingText.note("Plain briefing (Couldn't reach Anthropic)", 3_240, 120, missing, online = false)
+        assertEquals(
+            "Plain briefing (Couldn't reach Anthropic) in 3.2 s; 120 words, about 40 s. " +
+                "No weather: Unable to resolve host \"api.open-meteo.com\". No music on this day: Wikipedia couldn't be reached." +
+                " - No internet",
+            offline,
+        )
+        // Online: exactly as before, nothing added.
+        assertEquals(
+            "Written by Claude in 7.5 s; 195 words, about 65 s.",
+            BriefingText.note("Written by Claude", 7_520, 195, emptyList(), online = true),
+        )
+    }
+
+    @Test
     fun thePlainBriefing_coversEachSegment_andFits() {
         val facts = BriefingFacts(
             now = now,

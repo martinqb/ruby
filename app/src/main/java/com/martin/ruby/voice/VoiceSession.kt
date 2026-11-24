@@ -64,6 +64,12 @@ object VoiceSession {
     private var voiceWatch: Job? = null
     private var ears: RubyEars? = null
 
+    /** The car's pause button and the like stop her while she talks. */
+    private var buttons: MediaButtons? = null
+
+    /** What she's saying, for the car's screen while she talks. */
+    private var talkingAbout = DEFAULT_TALKING
+
     /** Splits the reply being spoken into sentences; null when this reply isn't spoken. */
     private var chunker: SpeechChunker? = null
 
@@ -72,6 +78,7 @@ object VoiceSession {
         if (appContext != null) return
         val app = context.applicationContext
         appContext = app
+        buttons = MediaButtons(app) { stopSpeaking() }
         ears = AndroidSpeechEars(app).also { e ->
             _ui.update { it.copy(canListen = e.available, listensOnDevice = e.onDevice) }
         }
@@ -145,10 +152,13 @@ object VoiceSession {
      * Speaks [text] from anywhere, even with Ruby's screen closed (the morning briefing):
      * starts the voice if it isn't yet, waits for it, then speaks.
      */
-    suspend fun speakWhenReady(context: Context, text: String) {
+    suspend fun speakWhenReady(context: Context, text: String, what: String = DEFAULT_TALKING) {
         withContext(Dispatchers.Main) { start(context) }
         withTimeoutOrNull(10_000) { ui.first { it.usingEngine != null } }
-        withContext(Dispatchers.Main) { play(text) }
+        withContext(Dispatchers.Main) {
+            talkingAbout = what
+            play(text)
+        }
     }
 
     fun stopSpeaking() {
@@ -221,7 +231,13 @@ object VoiceSession {
                 "Voice: using ${engine.label}" + if (engine == VoiceEngine.KOKORO) " (${prefs.kokoroSpeaker.label})." else "."
             )
             voiceWatch = scope.launch {
-                launch { v.speaking.collect { s -> _ui.update { it.copy(speaking = s) } } }
+                launch {
+                    v.speaking.collect { s ->
+                        _ui.update { it.copy(speaking = s) }
+                        buttons?.talking(s, talkingAbout)
+                        if (!s) talkingAbout = DEFAULT_TALKING
+                    }
+                }
                 launch { v.problem.collect { p -> _ui.update { it.copy(problem = p) } } }
                 launch { v.sounding.collect { s -> _ui.update { it.copy(sounding = s) } } }
                 launch { v.loading.collect { l -> _ui.update { it.copy(loading = l) } } }
@@ -232,6 +248,8 @@ object VoiceSession {
 
     private fun inVehicle(): Boolean = ContextStatus.reading.value?.state?.kind in
         setOf(ContextState.Kind.DRIVING, ContextState.Kind.IN_VEHICLE)
+
+    private const val DEFAULT_TALKING = "Ruby is talking"
 
     private fun onMain(block: () -> Unit) {
         scope.launch { block() }

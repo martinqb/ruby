@@ -98,6 +98,17 @@ object BriefingText {
 
     fun seconds(words: Int): Int = words * 60 / WORDS_PER_MINUTE
 
+    /** Added to the end of the "Last briefing" note when the phone had no internet connection. */
+    const val NO_INTERNET = " - No internet"
+
+    /**
+     * The "Last briefing" note: how it was written and how long it is, then why any part was
+     * missing (in the sources' own words), and [NO_INTERNET] at the end if the phone was offline.
+     */
+    fun note(how: String, tookMs: Long, words: Int, notes: List<String>, online: Boolean): String =
+        "$how in ${tookMs / 100 / 10.0} s; $words words, about ${seconds(words)} s." +
+            notes.joinToString("") { " $it" } + if (online) "" else NO_INTERNET
+
     const val SYSTEM_PROMPT =
         "You are Ruby, the assistant on the user's phone. The user has just got into their car in the " +
             "morning, and you'll greet them with a short spoken briefing, read aloud by a text-to-speech " +
