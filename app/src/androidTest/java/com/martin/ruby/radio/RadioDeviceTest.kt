@@ -62,12 +62,12 @@ class RadioDeviceTest {
         }
     }
 
-    /** A minute of a quiet tone, as a WAV file the player can stream like a station. */
+    /** Three minutes of a quiet tone (longer than any test plays it), as a WAV file the player can stream like a station. */
     private fun tone(): Uri {
-        val file = File(context.cacheDir, "radio-test-tone.wav")
+        val file = File(context.cacheDir, "radio-test-tone-3min.wav")
         if (!file.exists()) {
             val rate = 16_000
-            val samples = rate * 60
+            val samples = rate * 180
             val data = ByteBuffer.allocate(44 + samples * 2).order(ByteOrder.LITTLE_ENDIAN)
             data.put("RIFF".toByteArray()).putInt(36 + samples * 2).put("WAVE".toByteArray())
             data.put("fmt ".toByteArray()).putInt(16).putShort(1).putShort(1).putInt(rate).putInt(rate * 2).putShort(2).putShort(16)
@@ -102,6 +102,56 @@ class RadioDeviceTest {
         audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE, 0))
         audio.dispatchMediaKeyEvent(KeyEvent(now, now + 50, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PAUSE, 0))
         assertTrue("Pause should stop it", waitUntil(3_000) { !Radio.state.value.playing })
+    }
+
+    private fun shell(command: String): String =
+        instrumentation.uiAutomation.executeShellCommand(command).let { fd ->
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(fd).bufferedReader().use { it.readText() }
+        }
+
+    @Test
+    fun whilePlaying_itsAForegroundMediaService_holdingWakeAndWifiLocks() {
+        emulatorOnly()
+        startTone()
+        Thread.sleep(1_000)
+        val service = shell("dumpsys activity services com.martin.ruby/.radio.RadioService")
+        log("Service: " + service.lines().filter { "isForeground" in it || "foregroundServiceType" in it }.joinToString(" | ") { it.trim() })
+        assertTrue("A foreground service", service.contains("isForeground=true"))
+        // Android lists the media-playback type as 0x00000002.
+        assertTrue("Of the media-playback type", Regex("types=0x0*2\\b").containsMatchIn(service))
+        val power = shell("dumpsys power")
+        assertTrue("Holds a wake lock while playing", power.lines().any { "ExoPlayer" in it && "WAKE_LOCK" in it.uppercase() || "ExoPlayer:WakeLockManager" in it })
+    }
+
+    @Test
+    fun withTheScreenOff_itKeepsPlaying() {
+        emulatorOnly()
+        startTone()
+        shell("input keyevent KEYCODE_SLEEP")
+        try {
+            val minutes = 2
+            repeat(minutes * 6) {
+                Thread.sleep(10_000)
+                assertTrue("Still playing after ${(it + 1) * 10} s with the screen off", Radio.state.value.playing)
+            }
+            log("Played $minutes minutes with the screen off")
+        } finally {
+            shell("input keyevent KEYCODE_WAKEUP")
+            shell("wm dismiss-keyguard")
+        }
+    }
+
+    @Test
+    fun aDeadStream_isRetried_thenGivenUpCleanly() {
+        emulatorOnly()
+        // Nothing listens on this port: every connection fails, like a lost signal.
+        instrumentation.runOnMainSync { Radio.playUri(context, Uri.parse("https://127.0.0.1:9/dead.mp3"), Stations.WGRR) }
+        assertTrue("Shows it's reconnecting", waitUntil(10_000) { Radio.state.value.problem?.contains("reconnecting") == true })
+        assertTrue("Still counts as on while reconnecting, so stop works", Radio.state.value.on)
+        log("Reconnecting: ${Radio.state.value.problem}")
+        // 2 + 4 + 8 + 15 + 30 seconds of tries, then it gives up and is off.
+        assertTrue("Gives up after the tries", waitUntil(90_000) { !Radio.state.value.on })
+        assertEquals("WGRR 103.5 couldn't reconnect.", Radio.state.value.problem)
     }
 
     @Test

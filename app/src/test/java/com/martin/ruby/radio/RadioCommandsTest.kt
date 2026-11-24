@@ -86,6 +86,20 @@ class RadioCommandsTest {
     }
 
     @Test
+    fun aDroppedStream_isTriedAgain_withGrowingGaps_thenGivenUp() {
+        val r = Reconnect()
+        assertEquals(listOf(2_000L, 4_000L, 8_000L, 15_000L, 30_000L), List(5) { r.next(retriable = true) })
+        assertNull("gives up after five tries", r.next(retriable = true))
+        r.playing() // back on air: starts over
+        assertEquals(2_000L, r.next(retriable = true))
+        assertNull("a bad station address isn't retried", Reconnect().next(retriable = false))
+        // Network and stream errors are worth retrying; a broken file format isn't.
+        assertTrue(Reconnect.retriable(androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED))
+        assertTrue(Reconnect.retriable(androidx.media3.common.PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW))
+        assertFalse(Reconnect.retriable(androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED))
+    }
+
+    @Test
     fun afterTheBriefing_onlyWhenOn_inTheCar_andNotStopped() {
         assertTrue(RadioCommands.startAfterBriefing(enabled = true, inCar = true, stoppedByUser = false))
         assertFalse(RadioCommands.startAfterBriefing(enabled = false, inCar = true, stoppedByUser = false))

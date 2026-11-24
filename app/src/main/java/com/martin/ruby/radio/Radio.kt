@@ -117,21 +117,37 @@ object Radio {
 
     private val listener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            _state.value = _state.value.copy(playing = isPlaying, starting = if (isPlaying) false else _state.value.starting)
+            _state.value = if (isPlaying) {
+                _state.value.copy(playing = true, starting = false, problem = null) // (back) on air
+            } else {
+                _state.value.copy(playing = false)
+            }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) {
-                _state.value = _state.value.copy(playing = false, starting = false)
+            val c = controller ?: return
+            // The service clears the station when it stops or gives up reconnecting: then it's off.
+            if ((playbackState == Player.STATE_IDLE || playbackState == Player.STATE_ENDED) && c.mediaItemCount == 0) {
+                val wasReconnecting = _state.value.problem?.contains("reconnecting") == true
+                _state.value = _state.value.copy(
+                    playing = false, starting = false,
+                    problem = if (wasReconnecting) "${_state.value.station?.name ?: "The radio"} couldn't reconnect." else _state.value.problem,
+                )
             }
         }
 
         override fun onPlayerError(error: PlaybackException) {
             val name = _state.value.station?.name ?: "The radio"
-            SensingLog.add("Radio: $name couldn't play (${error.errorCodeName}): ${error.message}")
+            SensingLog.add("Radio: $name (${error.errorCodeName}): ${error.message}")
+            // The service tries again by itself (see Reconnect); meanwhile it still counts as on.
+            val retrying = Reconnect.retriable(error.errorCode)
             _state.value = _state.value.copy(
-                playing = false, starting = false,
-                problem = "$name couldn't play: " + if (error.errorCode in NETWORK_ERRORS) "no internet connection." else "the stream didn't work.",
+                playing = false, starting = retrying,
+                problem = when {
+                    retrying && error.errorCode in NETWORK_ERRORS -> "$name dropped out (no connection); reconnecting…"
+                    retrying -> "$name dropped out; reconnecting…"
+                    else -> "$name couldn't play: the stream didn't work."
+                },
             )
         }
     }
