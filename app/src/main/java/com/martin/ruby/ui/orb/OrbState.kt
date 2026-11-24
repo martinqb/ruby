@@ -71,8 +71,21 @@ object OrbMath {
         OrbState.SPEAKING -> 0.3f + 0.24f * wave(t * 12.4) + 0.16f * wave(t * 6 + 1.2)
         OrbState.THINKING -> 0.24f + 0.2f * wave(t * 4.8)
         OrbState.CONNECTING -> 0.12f + 0.1f * wave(t * 3.2)
-        OrbState.ERROR -> 0.2f
+        OrbState.ERROR -> 0.15f + 0.5f * errorPulse(t)
         OrbState.IDLE -> 0f
+    }
+
+    /** How long one error "double pulse" cycle takes, in seconds. */
+    const val ERROR_CYCLE = 1.6
+
+    /**
+     * The error state's own motion: two quick pulses, then a rest, over and over (0..1). A
+     * rhythm no other state has, so an error is recognizable without relying on its color.
+     */
+    fun errorPulse(t: Double): Float {
+        val x = t - kotlin.math.floor(t / ERROR_CYCLE) * ERROR_CYCLE
+        fun bump(center: Double) = exp(-((x - center) / 0.05) * ((x - center) / 0.05)).toFloat()
+        return (bump(0.08) + bump(0.30)).coerceAtMost(1f)
     }
 
     /**
@@ -168,7 +181,8 @@ class OrbAnimator(initial: OrbState = OrbState.IDLE) {
     val treble get() = OrbMath.clamp01(level * (0.78f + 0.22f * sin(time * 4.6 + 4.2).toFloat()))
 
     private companion object {
-        val CALM_STATES = setOf(OrbState.IDLE, OrbState.CONNECTING, OrbState.ERROR)
+        // Not error: its quick double pulse needs every frame to look crisp.
+        val CALM_STATES = setOf(OrbState.IDLE, OrbState.CONNECTING)
     }
 }
 
@@ -210,14 +224,23 @@ data class AuroraPalette(
             glow = mix(to, from, 0.25f),
         )
 
-        /** Error is rose and red, on a darker red sky. */
+        /** The error color: amber, so it never clashes with a red orb (such as the ruby-red option). */
+        const val AMBER = 0xFFFF9F1C.toInt()
+
+        /** The error color for text on a light background, where bright amber is hard to read. */
+        const val AMBER_TEXT_ON_LIGHT = 0xFFB45309.toInt()
+
+        /**
+         * Error is amber and orange on a dark warm sky. The same whatever the orb's own colors,
+         * so it looks like an error on every color theme.
+         */
         fun error() = AuroraPalette(
-            0xFF2B1322.toInt(), 0xFF1D0E1A.toInt(), 0xFF150913.toInt(), 0xFF08040A.toInt(),
-            hi = 0xFFFFE4E6.toInt(),
-            green = 0xFFFB7185.toInt(),
-            cyan = 0xFFF43F5E.toInt(),
-            pink = 0xFFFDA4AF.toInt(),
-            glow = 0xFFF43F5E.toInt(),
+            0xFF2A1D0B.toInt(), 0xFF1D1408.toInt(), 0xFF150E05.toInt(), 0xFF080502.toInt(),
+            hi = 0xFFFFE8C2.toInt(),
+            green = AMBER,
+            cyan = 0xFFF77F00.toInt(), // deeper orange
+            pink = 0xFFFFC36B.toInt(), // light amber
+            glow = AMBER,
         )
 
         /** Mixes opaque colors [a] and [b] (t = 0 is a, 1 is b) in linear light. */

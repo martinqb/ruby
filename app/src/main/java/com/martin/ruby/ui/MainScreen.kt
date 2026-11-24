@@ -31,7 +31,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import com.martin.ruby.BuildConfig
 import com.martin.ruby.chat.ChatUi
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import com.martin.ruby.ui.orb.AuroraOrb
+import com.martin.ruby.ui.orb.AuroraPalette
 import com.martin.ruby.ui.orb.OrbState
 import com.martin.ruby.ui.orb.orbStateFor
 import com.martin.ruby.voice.VoiceUi
@@ -245,11 +248,14 @@ private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit) {
         Text(
             shown.label + if (demo != null) " (demo: long-press for the next)" else "",
             style = MaterialTheme.typography.titleMedium,
-            color = if (shown == OrbState.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (shown == OrbState.ERROR) errorAmber() else MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
-        if (shown == OrbState.ERROR && demo == null) {
-            (chat.error ?: voice.problem)?.let { Details(it) }
+        if (shown == OrbState.ERROR) {
+            // In the demo, an example of the reason shown under a real error.
+            (if (demo != null) "Example: Ruby couldn't reach Claude. Check the internet." else chat.error ?: voice.problem)
+                ?.let { Details(it) }
         }
         Spacer(Modifier.height(12.dp))
     }
@@ -279,6 +285,12 @@ private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit) {
     ChatErrorDialog(chat, ruby.chatActions.onDismissError)
     if (showVoice) VoiceSettingsDialog(voice, ruby.chatActions, onClose = { showVoice = false })
 }
+
+/** The orb's amber error color for text: bright on dark backgrounds, darker on light ones to stay readable. */
+@Composable
+private fun errorAmber() = Color(
+    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) AuroraPalette.AMBER else AuroraPalette.AMBER_TEXT_ON_LIGHT
+)
 
 /** The orb's test tag, for UI tests. */
 const val ORB_TAG = "ruby-orb"

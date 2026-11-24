@@ -160,6 +160,8 @@ class AuroraRenderer(private val orbPx: Float, from: Int = AuroraPalette.FROM, t
         val think = mix.weight(OrbState.THINKING)
         val connect = mix.weight(OrbState.CONNECTING)
         val err = mix.weight(OrbState.ERROR)
+        // The error state's quick double pulse: the orb, its halo and its front light all beat.
+        val beat = if (err > 0.002f) err * OrbMath.errorPulse(t) else 0f
         val paletteWeights = floatArrayOf((1f - think - err).coerceAtLeast(0f), think, err)
 
         canvas.save()
@@ -167,12 +169,12 @@ class AuroraRenderer(private val orbPx: Float, from: Int = AuroraPalette.FROM, t
         canvas.drawCircle(0f, 22f * k, radius + 24f * k, shadowPaint)
 
         // Listening makes the whole orb swell with the voice.
-        val orbScale = 1f + (0.012f + 0.05f * listen) * bass
+        val orbScale = 1f + (0.012f + 0.05f * listen) * bass + 0.035f * beat
         canvas.scale(orbScale, orbScale)
 
         // Halo
-        val haloOpacity = 0.16f + (0.1f + 0.3f * listen) * level + (0.06f + 0.22f * listen) * bass
-        val haloScale = 1f + (0.01f + 0.03f * listen) * level + (0.02f + 0.07f * listen) * bass
+        val haloOpacity = 0.16f + (0.1f + 0.3f * listen) * level + (0.06f + 0.22f * listen) * bass + 0.45f * beat
+        val haloScale = 1f + (0.01f + 0.03f * listen) * level + (0.02f + 0.07f * listen) * bass + 0.06f * beat
         canvas.save()
         canvas.scale(haloScale, haloScale)
         for (p in palettes.indices) {
@@ -200,7 +202,7 @@ class AuroraRenderer(private val orbPx: Float, from: Int = AuroraPalette.FROM, t
             0.4f + 0.16f * level + 0.16f * bass,
             0.5f + (0.08f + 0.18f * speak) * level + (0.06f + 0.26f * speak) * treble,
             (0.08f + (0.2f + 0.4f * speak) * level + (0.16f + 0.44f * speak) * treble) * (1f - connect - think).coerceAtLeast(0f) +
-                (0.06f + 0.44f * pulseSlow) * connect + (0.14f + 0.5f * pulse) * think,
+                (0.06f + 0.44f * pulseSlow) * connect + (0.14f + 0.5f * pulse) * think + 0.5f * beat,
         )
         for (v in veils.indices) {
             val spec = veils[v]

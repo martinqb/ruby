@@ -77,8 +77,11 @@ class OrbStateTest {
         assertTrue(anim.calm)
         anim.step(OrbState.SPEAKING, -1f, 1 / 60f)
         assertFalse(anim.calm)
-        repeat(120) { anim.step(OrbState.ERROR, -1f, 1 / 60f) }
+        repeat(120) { anim.step(OrbState.CONNECTING, -1f, 1 / 60f) }
         assertTrue(anim.calm)
+        // Error's quick double pulse needs every frame.
+        repeat(120) { anim.step(OrbState.ERROR, -1f, 1 / 60f) }
+        assertFalse(anim.calm)
     }
 
     @Test
@@ -103,6 +106,33 @@ class OrbStateTest {
         // Thinking leans violet: more blue-red than green compared with normal.
         val t = AuroraPalette.thinking()
         assertTrue(((t.green shr 16) and 0xFF) > ((p.green shr 16) and 0xFF))
-        assertEquals(0xFFF43F5E.toInt(), AuroraPalette.error().glow)
+        // Error is amber, not red, so it never clashes with a red orb.
+        val error = AuroraPalette.error()
+        assertEquals(0xFFFF9F1C.toInt(), error.glow)
+        assertEquals(0xFFFF9F1C.toInt(), error.green)
+        for (c in listOf(error.hi, error.green, error.cyan, error.pink, error.glow)) {
+            val r = (c shr 16) and 0xFF
+            val g = (c shr 8) and 0xFF
+            val b = c and 0xFF
+            assertTrue("amber or orange, not red or pink: ${Integer.toHexString(c)}", r > g && g > b && g >= r * 0.5)
+        }
+    }
+
+    @Test
+    fun errorHasItsOwnDoublePulse() {
+        // Over one cycle: two quick peaks, then a long quiet rest.
+        val samples = (0 until 160).map { OrbMath.errorPulse(it / 100.0) } // 1.6 s at 100 per second
+        var peaks = 0
+        for (i in 1 until samples.size - 1) {
+            if (samples[i] > 0.9f && samples[i] >= samples[i - 1] && samples[i] > samples[i + 1]) peaks++
+        }
+        assertEquals("two pulses per cycle", 2, peaks)
+        assertTrue("quiet between them", samples[19] < 0.3f)
+        assertTrue("then a rest", samples.drop(50).all { it < 0.01f })
+        // It repeats.
+        assertEquals(OrbMath.errorPulse(0.08), OrbMath.errorPulse(0.08 + OrbMath.ERROR_CYCLE * 3), 1e-4f)
+        // No other state has this rhythm: their motion is continuous waves.
+        assertTrue(OrbMath.energy(OrbState.ERROR, 0.08) > 0.6f)
+        assertTrue(OrbMath.energy(OrbState.ERROR, 1.0) < 0.2f)
     }
 }
