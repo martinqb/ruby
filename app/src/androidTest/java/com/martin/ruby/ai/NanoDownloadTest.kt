@@ -13,7 +13,9 @@ import com.google.mlkit.genai.prompt.ModelPreference
 import com.google.mlkit.genai.prompt.ModelReleaseStage
 import com.martin.ruby.MainActivity
 import kotlinx.coroutines.flow.takeWhile
+import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.runBlocking
+import org.junit.Assume.assumeTrue
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -21,8 +23,9 @@ import org.junit.runner.RunWith
 
 /**
  * Downloads the full Gemini Nano model, logging progress ("NanoDownload"). DOWNLOADS
- * GIGABYTES: run it only when asked, on Wi-Fi (Martin asked on 2026-11-24). It keeps Ruby
- * open meanwhile, since Gemini Nano works with apps in the foreground.
+ * GIGABYTES, so it's skipped unless asked for explicitly, on Wi-Fi, with the user's OK:
+ *   adb shell am instrument -w -e class com.martin.ruby.ai.NanoDownloadTest -e download yes  *     com.martin.ruby.test/androidx.test.runner.AndroidJUnitRunner
+ * It keeps Ruby open meanwhile, since Gemini Nano works with apps in the foreground.
  */
 @RunWith(AndroidJUnit4::class)
 class NanoDownloadTest {
@@ -31,6 +34,10 @@ class NanoDownloadTest {
 
     @Test
     fun downloadTheFullModel() = runBlocking {
+        assumeTrue(
+            "Downloads gigabytes: only with -e download yes",
+            InstrumentationRegistry.getArguments().getString("download") == "yes",
+        )
         val model = Generation.getClient(
             GenerationConfig.builder().apply {
                 modelConfig = ModelConfig.builder().apply {
