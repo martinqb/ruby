@@ -44,7 +44,28 @@ class BriefingTextTest {
         assertTrue(prompt.contains("Tuesday, November 24, 2026"))
         assertTrue(prompt.contains("- 9:30 AM to 10:00 AM: Dentist (at Main St Dental)"))
         assertTrue(prompt.contains("- 1971: Led Zeppelin released their fourth album."))
+        assertTrue(prompt.contains("what makes it music history (the song, album, band or musician)"))
         assertTrue(prompt.contains("Rain likely from about 3:00 PM"))
+    }
+
+    @Test
+    fun freeModesPrompt_isShorter_andItsRulesCoverTheSlipsSeen() {
+        val facts = BriefingFacts(
+            now = now,
+            profile = everything,
+            forecast = ForecastTest.forecast(),
+            sky = SkyTonightTest.sampleSky(),
+            music = (1..6).map { MusicMoment(1960 + it, "Music moment $it.", "event") },
+        )
+        val full = BriefingText.prompt(facts, zone)
+        val compact = BriefingText.prompt(facts, zone, compact = true)
+        assertTrue("${compact.length} < ${full.length}", compact.length < full.length)
+        assertTrue(full.contains("- 1966: Music moment 6.") && !compact.contains("Music moment 4."))
+        assertTrue(compact.contains("Weather: now 31°F and overcast.") && compact.contains("Rest of today: mostly rain"))
+        val rules = BriefingText.FREE_MODE_RULES
+        assertTrue(rules.contains("A full moon rises around sunset and is up all night"))
+        assertTrue(rules.contains("never both as if at once"))
+        assertTrue(rules.contains("what makes it music history"))
     }
 
     @Test

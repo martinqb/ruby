@@ -1,6 +1,7 @@
 package com.martin.ruby.memory
 
 import android.content.Context
+import android.os.SystemClock
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -18,18 +19,24 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.martin.ruby.BuildConfig
+import com.martin.ruby.ai.AiEngine
+import com.martin.ruby.ai.AiSettings
+import com.martin.ruby.ai.FreeMode
 import com.martin.ruby.backup.NightlyBackup
 import com.martin.ruby.chat.ApiKeyStore
 import com.martin.ruby.data.dataStore
 import com.martin.ruby.log.SensingLog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -168,6 +175,34 @@ object Summaries {
         return RunResult(made, failed, days.size > MAX_DAYS_PER_RUN, null)
     }
 
+    /**
+     * One run with Free mode (Gemini Nano on the phone). Nano only works while Ruby is open, so
+     * this runs when she's opened (and from "Summarize now"); the nightly job can't use it.
+     */
+    suspend fun runWithFreeMode(context: Context, ageDays: Long = AGE_DAYS): RunResult {
+        val app = context.applicationContext
+        return run(app, summarize = FreeSummarizer(), ageDays = ageDays).also {
+            SummarySettings(app).recordRun("Free mode: ${it.describe()}")
+            SensingLog.add("Summaries (Free mode): ${it.describe()}")
+        }
+    }
+
+    /** Free mode: summarize any days that are due, while Ruby is open. At most every few hours. */
+    fun catchUpInFreeMode(context: Context) {
+        val app = context.applicationContext
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastFreeCatchUp < FREE_CATCH_UP_GAP_MS && lastFreeCatchUp != 0L) return
+        lastFreeCatchUp = now
+        freeScope.launch {
+            if (AiSettings(app).current() != AiEngine.FREE || !FreeMode.ready()) return@launch
+            runCatching { runWithFreeMode(app) }.onFailure { SensingLog.add("Summaries (Free mode) failed: ${it.message}") }
+        }
+    }
+
+    private var lastFreeCatchUp = 0L
+    private const val FREE_CATCH_UP_GAP_MS = 6 * 60 * 60_000L
+    private val freeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     /** One run with Claude, as the nightly job and "Summarize now" do it. Records the result. */
     suspend fun runWithClaude(context: Context, ageDays: Long = AGE_DAYS): RunResult? {
         val app = context.applicationContext
@@ -234,7 +269,18 @@ object Summaries {
 class SummaryWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = try {
         val ageDays = if (inputData.getBoolean(INCLUDE_RECENT, false) && BuildConfig.DEBUG) Summaries.INCLUDE_TODAY else Summaries.AGE_DAYS
-        Summaries.runWithClaude(applicationContext, ageDays)
+        if (AiSettings(applicationContext).current() == AiEngine.FREE) {
+            // Free mode never hands summaries to Claude. Gemini Nano works only while Ruby is
+            // open: this works for "Summarize now"; at night it's refused, and the days are
+            // summarized the next time Ruby is opened.
+            try {
+                Summaries.runWithFreeMode(applicationContext, ageDays)
+            } catch (e: Exception) {
+                SummarySettings(applicationContext).recordRun("Free mode: waiting until Ruby is open (${e.message})")
+            }
+        } else {
+            Summaries.runWithClaude(applicationContext, ageDays)
+        }
         Result.success()
     } catch (e: CancellationException) {
         throw e // stopped (e.g. unplugged); runs again later

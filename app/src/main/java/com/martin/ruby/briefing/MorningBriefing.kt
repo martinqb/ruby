@@ -6,6 +6,9 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.martin.ruby.ai.AiEngine
+import com.martin.ruby.ai.AiSettings
+import com.martin.ruby.ai.FreeMode
 import com.martin.ruby.chat.ApiKeyStore
 import com.martin.ruby.data.PlaceStore
 import com.martin.ruby.data.dataStore
@@ -109,7 +112,7 @@ object MorningBriefing {
             // Marked first, so the car connecting again meanwhile doesn't start a second one.
             app.dataStore.edit { it[Keys.LAST_DAY] = BriefingText.day(now) }
             SensingLog.add("Briefing: car connected; putting the morning briefing together.")
-            run(app)
+            run(app, foreground = false)
         }
     }
 
@@ -122,10 +125,11 @@ object MorningBriefing {
     /** "Hear it now": any time, without counting as this morning's briefing. */
     fun speakNow(context: Context) {
         val app = context.applicationContext
-        scope.launch { run(app) }
+        scope.launch { run(app, foreground = true) }
     }
 
-    private suspend fun run(app: Context) {
+    /** [foreground]: Ruby is open ("Hear it now"), so Free mode can be used; the car connecting isn't. */
+    private suspend fun run(app: Context, foreground: Boolean) {
         if (!running.tryLock()) return // one at a time
         stopped = false
         _working.value = true
@@ -134,7 +138,7 @@ object MorningBriefing {
             val state = state(app).first()
             val online = Connection.isOnline(app)
             val facts = gather(app, state)
-            val (briefing, how) = write(app, facts)
+            val (briefing, how) = write(app, facts, foreground)
             val text = briefing.text
             val tookMs = SystemClock.elapsedRealtime() - started
             if (stopped) {
@@ -243,12 +247,42 @@ object MorningBriefing {
     }
 
     /** Claude's briefing, or the plain one if Claude can't be had; with how it was written. */
-    private suspend fun write(app: Context, facts: BriefingFacts): Pair<Briefing, String> {
-        val key = ApiKeyStore(app).load() ?: return BriefingText.plain(facts) to "Plain briefing (no API key)"
+    private suspend fun write(app: Context, facts: BriefingFacts, foreground: Boolean): Pair<Briefing, String> {
+        // Free mode: Gemini Nano writes it when Ruby is open; it refuses work in the background
+        // (the car connecting), so then Claude writes it, and the note says why.
+        var why: String? = null
+        if (AiSettings(app).current() == AiEngine.FREE) {
+            why = if (!foreground) {
+                "Free mode can't run in the background"
+            } else if (!FreeMode.ready()) {
+                "Free mode isn't available right now"
+            } else {
+                try {
+                    return freeBriefing(facts) to "Written by Free mode"
+                } catch (e: FreeMode.Failed) {
+                    "Free mode couldn't write it: ${e.message?.trimEnd('.')}"
+                }
+            }
+            SensingLog.add("Briefing: $why.")
+        }
+        val because = why?.let { " ($it)" } ?: ""
+        val key = ApiKeyStore(app).load() ?: return BriefingText.plain(facts) to "Plain briefing (${why?.let { "$it; " } ?: ""}no API key)"
         return try {
-            BriefingWriter(key).write(facts) to "Written by Claude"
+            BriefingWriter(key).write(facts) to "Written by Claude$because"
         } catch (e: BriefingWriter.Failed) {
             BriefingText.plain(facts) to "Plain briefing (${e.message?.trimEnd('.')})"
+        }
+    }
+
+    /** The briefing written by Gemini Nano on the phone. Throws [FreeMode.Failed]. */
+    private suspend fun freeBriefing(facts: BriefingFacts): Briefing {
+        val answer = FreeMode.write(
+            BriefingText.SYSTEM_PROMPT + BriefingText.FREE_MODE_RULES,
+            BriefingText.prompt(facts, compact = true),
+            maxTokens = 700,
+        )
+        return BriefingText.fit(BriefingText.parse(answer, facts.segments)).also {
+            if (it.parts.isEmpty()) throw FreeMode.Failed("Free mode sent back an empty briefing.")
         }
     }
 

@@ -79,8 +79,9 @@ class ChatSummarizer(apiKey: String) {
             .ifEmpty { throw Failed("Claude sent back an empty summary.", stopRun = false) }
     }
 
-    private companion object {
-        const val SYSTEM_PROMPT =
+    companion object {
+        /** Also used by Free mode's summaries ([FreeSummarizer]). */
+        internal const val SYSTEM_PROMPT =
             "You summarize one day of a user's conversations with Ruby, the assistant on their phone, for " +
                 "Ruby's long-term memory. Later, Ruby will often see this summary instead of the messages, so " +
                 "keep what she would need: facts the user shared (names, dates, places, numbers, preferences), " +
