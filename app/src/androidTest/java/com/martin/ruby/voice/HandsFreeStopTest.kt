@@ -87,7 +87,7 @@ class HandsFreeStopTest {
     fun stop_stopsHer() = assertStopsOn("Stop") { press(KeyEvent.KEYCODE_MEDIA_STOP) }
 
     @Test
-    fun aPauseFromTheSystem_stopsHer() = assertStopsOn("System pause (as from \"Hey Google, stop\")") {
+    fun aPauseFromTheSystem_stopsHer() = assertStopsOn("System pause (as from \"Hi Bixby, pause\" or \"Hey Google, stop\")") {
         // The same route a Bluetooth car's or the Assistant's pause takes into the media system.
         instrumentation.uiAutomation.executeShellCommand("cmd media_session dispatch pause").close()
     }

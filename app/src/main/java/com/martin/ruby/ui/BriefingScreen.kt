@@ -42,12 +42,16 @@ data class BriefingSetup(
     val hasHome: Boolean = false,
     val hasCalendar: Boolean = false,
     val working: Boolean = false,
+    /** Ruby is talking (the briefing or anything else). */
+    val speaking: Boolean = false,
 )
 
 data class BriefingActions(
     val onEnable: (Boolean) -> Unit = {},
     val onProfile: (BriefingProfile) -> Unit = {},
     val onHearNow: () -> Unit = {},
+    /** Stops her talking, and a briefing still being put together. */
+    val onStopTalking: () -> Unit = {},
     val onAllowCalendar: () -> Unit = {},
     val onBack: () -> Unit = {},
 )
@@ -125,8 +129,14 @@ fun BriefingScreen(state: BriefingState, setup: BriefingSetup, actions: Briefing
         Text("About $words words, roughly ${BriefingText.seconds(words)} seconds.", style = small, color = muted)
 
         Spacer(Modifier.height(16.dp))
-        Button(onClick = actions.onHearNow, enabled = !setup.working && profile.spoken.isNotEmpty()) {
-            Text(if (setup.working) "Putting it together…" else "Hear it now")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = actions.onHearNow, enabled = !setup.working && profile.spoken.isNotEmpty()) {
+                Text(if (setup.working) "Putting it together…" else "Hear it now")
+            }
+            Spacer(Modifier.width(8.dp))
+            OutlinedButton(onClick = actions.onStopTalking, enabled = setup.speaking || setup.working) {
+                Text("Stop talking")
+            }
         }
         Text("Plays today's briefing now, any time. It doesn't count as this morning's.", style = small, color = muted)
 

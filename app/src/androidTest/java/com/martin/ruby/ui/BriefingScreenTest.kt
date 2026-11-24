@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -37,6 +38,7 @@ class BriefingScreenTest {
     private var setup by mutableStateOf(BriefingSetup(hasCar = true, hasHome = true, hasCalendar = false))
     private var calendarAsked = 0
     private var heard = 0
+    private var stopped = 0
 
     private fun show() = compose.setContent {
         RubyTheme {
@@ -47,6 +49,7 @@ class BriefingScreenTest {
                     onEnable = { state = state.copy(enabled = it) },
                     onProfile = { state = state.copy(profile = it) },
                     onHearNow = { heard++ },
+                    onStopTalking = { stopped++ },
                     onAllowCalendar = { calendarAsked++ },
                 ),
             )
@@ -98,6 +101,25 @@ class BriefingScreenTest {
         compose.onNodeWithTag("module-music").performClick()
         assertEquals(BriefingProfile().with(BriefingModule.MUSIC, false), state.profile)
         compose.onNodeWithText("About 119 words, roughly 39 seconds.").assertExists()
+    }
+
+    @Test
+    fun stopTalking_sitsNextToHearItNow_andWorksWhileSheTalks() {
+        show()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Stop talking"))
+        // Quiet: nothing to stop.
+        compose.onNodeWithText("Stop talking").assertIsNotEnabled()
+        // Talking, or still putting a briefing together: it stops her.
+        setup = setup.copy(speaking = true)
+        compose.onNodeWithText("Stop talking").assertIsEnabled().performClick()
+        assertEquals(1, stopped)
+        setup = setup.copy(speaking = false, working = true)
+        compose.onNodeWithText("Stop talking").assertIsEnabled().performClick()
+        assertEquals(2, stopped)
+        // Right next to Hear it now: on the same line.
+        val hear = compose.onNodeWithText("Putting it together…").fetchSemanticsNode().boundsInRoot
+        val stop = compose.onNodeWithText("Stop talking").fetchSemanticsNode().boundsInRoot
+        assertTrue("Same row", kotlin.math.abs(hear.center.y - stop.center.y) < 4f && stop.left > hear.right)
     }
 
     @Test

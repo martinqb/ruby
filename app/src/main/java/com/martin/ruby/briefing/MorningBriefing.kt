@@ -59,6 +59,9 @@ object MorningBriefing {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val running = Mutex()
 
+    /** Set by [stop] while one is being put together, so it isn't spoken once it's ready. */
+    @Volatile private var stopped = false
+
     private val _working = MutableStateFlow(false)
     /** True while a briefing is being put together. */
     val working: StateFlow<Boolean> = _working.asStateFlow()
@@ -110,6 +113,12 @@ object MorningBriefing {
         }
     }
 
+    /** Stop talking: stops her, and a briefing still being put together won't be spoken. */
+    fun stop() {
+        if (_working.value) stopped = true
+        VoiceSession.stopSpeaking()
+    }
+
     /** "Hear it now": any time, without counting as this morning's briefing. */
     fun speakNow(context: Context) {
         val app = context.applicationContext
@@ -118,6 +127,7 @@ object MorningBriefing {
 
     private suspend fun run(app: Context) {
         if (!running.tryLock()) return // one at a time
+        stopped = false
         _working.value = true
         try {
             val started = SystemClock.elapsedRealtime()
@@ -127,6 +137,10 @@ object MorningBriefing {
             val (briefing, how) = write(app, facts)
             val text = briefing.text
             val tookMs = SystemClock.elapsedRealtime() - started
+            if (stopped) {
+                SensingLog.add("Briefing: stopped before it was spoken.")
+                return
+            }
             VoiceSession.speakWhenReady(app, text, what = "Morning briefing")
             val note = BriefingText.note(how, tookMs, briefing.words, facts.notes, online)
             SensingLog.add("Briefing: $note")

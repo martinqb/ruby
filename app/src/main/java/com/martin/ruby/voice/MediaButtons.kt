@@ -11,7 +11,8 @@ import com.martin.ruby.log.SensingLog
 
 /**
  * Stops Ruby hands-free while she's talking: the car's steering-wheel pause button, a
- * headset button, or "Hey Google, stop" (which presses pause for whatever is playing). While
+ * headset button, or a voice assistant's pause ("Hi Bixby, pause" on Samsung, "Hey Google,
+ * stop" elsewhere), which presses pause for whatever is playing. While
  * she talks she shows as playing, like a music app, so those come to her; once she's done,
  * they go back to the music app.
  *

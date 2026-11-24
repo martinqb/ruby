@@ -244,11 +244,13 @@ class MainActivity : ComponentActivity() {
                                 hasHome = places.any { it.name.equals("home", ignoreCase = true) },
                                 hasCalendar = hasCalendarPermission,
                                 working = briefingWorking,
+                                speaking = voice.speaking,
                             ),
                             actions = BriefingActions(
                                 onEnable = { MorningBriefing.setEnabled(applicationContext, it) },
                                 onProfile = { MorningBriefing.saveProfile(applicationContext, it) },
                                 onHearNow = { MorningBriefing.speakNow(applicationContext) },
+                                onStopTalking = MorningBriefing::stop,
                                 onAllowCalendar = { calendarLauncher.launch(Manifest.permission.READ_CALENDAR) },
                                 onBack = { screen = Screen.MAIN },
                             ),
