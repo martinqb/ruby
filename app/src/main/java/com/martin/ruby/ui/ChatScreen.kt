@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -94,6 +95,10 @@ data class ChatActions(
     /** "Use Claude for this one": a reminder Free mode couldn't do. */
     val onUseClaude: () -> Unit = {},
     val onDeclineOffer: () -> Unit = {},
+    /** Yes or no to Ruby's calendar question. */
+    val onCalendarAnswer: (Boolean) -> Unit = {},
+    /** Asks Android for calendar access (read and change). */
+    val onAllowCalendar: () -> Unit = {},
 )
 
 /** Chatting with Claude, as Ruby, by typing or talking. Asks for an API key first if there isn't one. */
@@ -255,6 +260,20 @@ internal fun ChatInput(ui: ChatUi, voice: VoiceUi, hasMicPermission: Boolean, ac
     if (voice.listening) {
         Listening(voice, actions)
         return
+    }
+    if (ui.calendarQuestion != null) {
+        Text(ui.calendarQuestion, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = { actions.onCalendarAnswer(true) }, enabled = !ui.sending, modifier = Modifier.testTag("calendar-yes")) { Text("Yes") }
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = { actions.onCalendarAnswer(false) }, enabled = !ui.sending, modifier = Modifier.testTag("calendar-no")) { Text("No") }
+        }
+        Spacer(Modifier.height(4.dp))
+    }
+    if (ui.needsCalendarAccess) {
+        OutlinedButton(onClick = actions.onAllowCalendar, modifier = Modifier.testTag("calendar-allow")) { Text("Allow calendar access") }
+        Text("So Ruby can read your calendars and add, change or delete events when you say yes.", style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(4.dp))
     }
     if (ui.claudeOffer != null) {
         Row(verticalAlignment = Alignment.CenterVertically) {

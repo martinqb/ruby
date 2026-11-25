@@ -119,6 +119,15 @@ class MainActivity : ComponentActivity() {
             if (granted) listen()
         }
 
+    /** Asked when Ruby first needs to change the calendar; then she finishes what she was asked. */
+    private val calendarAccessLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            val granted = result.values.all { it }
+            hasCalendarPermission = CalendarReader.hasPermission(this)
+            SensingLog.add("Calendar: access ${if (granted) "allowed" else "not allowed"}.")
+            ChatSession.calendarAccessResult(applicationContext, granted)
+        }
+
     /** Asked when the briefing (with today's calendar) is turned on. */
     private val calendarLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -242,6 +251,10 @@ class MainActivity : ComponentActivity() {
                         onDownloadFree = { lifecycleScope.launch { FreeMode.download() } },
                         onUseClaude = { ChatSession.useClaudeForOffer(applicationContext) },
                         onDeclineOffer = ChatSession::declineOffer,
+                        onCalendarAnswer = { yes -> ChatSession.answerCalendar(applicationContext, yes) },
+                        onAllowCalendar = {
+                            calendarAccessLauncher.launch(arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR))
+                        },
                     )
                 }
 

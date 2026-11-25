@@ -342,7 +342,12 @@ class ClaudeChat(apiKey: String, baseUrl: String? = null) {
                 "the phone did and what's playing. Trust it: never say the radio didn't play or that you were wrong " +
                 "about it. If the user asks for the radio in other words, tell them to say \"play the radio\", " +
                 "\"play\" and a station's name, or \"stop\".\n\n" +
-                "Apart from reminders and the radio, Ruby can only talk for now: she can't set alarms or timers, send " +
+                "Ruby can also read and change the user's calendars (Samsung Calendar, Google Calendar and any others on " +
+                "the phone; the \"Calendars\" note lists them). Use calendar_events to see what's on. To add, change or " +
+                "delete an event, use the propose_ tools: they save nothing; the phone asks the user and saves only when " +
+                "they say yes, then replies itself. So never say an event is saved, changed or deleted: ask the question " +
+                "the tool gives you, exactly. If the user asks to correct it (\"make it 10 instead\"), propose again.\n\n" +
+                "Apart from reminders, the radio and the calendar, Ruby can only talk for now: she can't set alarms or timers, send " +
                 "messages, make calls, open other apps, change phone settings, or do anything else outside this " +
                 "chat. Don't offer to do those things or say you've done them. If the user asks for one, say " +
                 "plainly that you can't do that yet and, if it helps, suggest how they can do it themselves. " +
@@ -366,12 +371,15 @@ class ClaudeChat(apiKey: String, baseUrl: String? = null) {
             memories: String?,
             /** What the phone has done with the radio, if anything (see [com.martin.ruby.radio.Radio.note]). */
             radio: String? = null,
+            /** The phone's calendars, if Ruby may read them (see [com.martin.ruby.calendar.CalendarText.note]). */
+            calendars: String? = null,
         ): String = buildString {
             append("[Right now: ")
             if (context != null) append("$context · ")
             append("$now]\n")
             if (reminders != null) append("[$reminders]\n")
             if (radio != null) append("[$radio]\n")
+            if (calendars != null) append("[$calendars]\n")
             if (places != null) append("[$places]\n")
             if (memories != null) append("[$memories]\n\n")
             append(text)

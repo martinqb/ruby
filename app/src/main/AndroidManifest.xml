@@ -46,6 +46,8 @@
 
     <!-- The morning briefing reads today's events. Asked only when the briefing is turned on. -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Adding, changing and deleting events, only after the user says yes. Asked when first needed. -->
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
 
     <!-- Voice: Android 11+ only lets Ruby find the speech recognizer and text-to-speech
          engine if it says it's looking for them. -->

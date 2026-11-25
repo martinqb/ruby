@@ -14,6 +14,12 @@ import com.martin.ruby.memory.MemoryMessage
 import com.martin.ruby.memory.MemoryRecall
 import com.martin.ruby.memory.MemoryStore
 import com.martin.ruby.data.PlaceStore
+import com.martin.ruby.calendar.CalendarAction
+import com.martin.ruby.calendar.CalendarHelper
+import com.martin.ruby.calendar.CalendarStore
+import com.martin.ruby.calendar.CalendarText
+import com.martin.ruby.calendar.CalendarTools
+import com.martin.ruby.calendar.ToolBoxes
 import com.martin.ruby.radio.PresetStore
 import com.martin.ruby.radio.Radio
 import com.martin.ruby.radio.RadioCommand
@@ -53,6 +59,10 @@ data class ChatUi(
      * this one?". Answered with [ChatSession.useClaudeForOffer] or [ChatSession.declineOffer].
      */
     val claudeOffer: String? = null,
+    /** A calendar change Ruby asked about ("…Shall I save it?"); nothing is saved until yes. */
+    val calendarQuestion: String? = null,
+    /** Saving needs calendar access the user hasn't given yet. */
+    val needsCalendarAccess: Boolean = false,
 ) {
     /** Whether the chat can be used: Free mode needs no key. */
     val canChat: Boolean get() = hasKey == true || engine == AiEngine.FREE
@@ -123,12 +133,81 @@ object ChatSession {
      */
     private var tools: ToolBox? = null
 
+    /** The calendar change Ruby asked about, waiting for a yes. Saved only then. */
+    private var pendingCalendar: CalendarAction? = null
+
+    /** Ruby asks about [action] (from Claude's tools or Free mode); returns the question she asks. */
+    private suspend fun proposeCalendar(context: Context, action: CalendarAction): String {
+        val calendars = CalendarStore(context).calendars()
+        val question = CalendarText.confirm(action, calendars, ZoneId.systemDefault())
+        pendingCalendar = action
+        _ui.update { it.copy(calendarQuestion = question) }
+        SensingLog.add("Calendar: asked \"$question\"")
+        return question
+    }
+
+    /** For tests: Ruby asks about [action], as if Claude's tools or Free mode had proposed it. */
+    internal suspend fun proposeCalendarForTest(context: Context, action: CalendarAction): String = proposeCalendar(context.applicationContext, action)
+
+    /** "Yes": saves the calendar change (asking for calendar access first if needed). Returns what Ruby says. */
+    private suspend fun saveCalendar(context: Context): String {
+        val action = pendingCalendar ?: return "There's nothing waiting to be saved."
+        val store = CalendarStore(context)
+        if (!store.canWrite()) {
+            _ui.update { it.copy(needsCalendarAccess = true) }
+            return "To do that I need permission to change your calendar. Tap Allow calendar access, and I'll save it straight away."
+        }
+        return try {
+            store.apply(action)
+            pendingCalendar = null
+            val calendars = store.calendars()
+            _ui.update { it.copy(calendarQuestion = null, needsCalendarAccess = false) }
+            lastCalendarAction = CalendarText.actionLine(action)
+            CalendarText.done(action, calendars, ZoneId.systemDefault())
+        } catch (e: Exception) {
+            SensingLog.add("Calendar: couldn't save (${e.message}).")
+            "That didn't work on the phone: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
+    /** The line under Ruby's reply after a calendar change (read once). */
+    private var lastCalendarAction: String? = null
+
+    /** A reply Ruby makes on the phone, without any AI: shown, spoken if this reply is read aloud, saved to memory. */
+    private suspend fun phoneReply(memory: MemoryStore, text: String, action: String? = null, speak: Boolean = false) {
+        if (speak) {
+            VoiceSession.replyStarted(true)
+            VoiceSession.replyProgress(text)
+            VoiceSession.replyFinished()
+        }
+        _ui.update { it.copy(turns = it.turns + ChatTurn(fromUser = false, text = text, actions = listOfNotNull(action)), sending = false, replying = null) }
+        saveToMemory(memory, MemoryMessage.ROLE_RUBY, text)
+    }
+
+    /** The Save / Yes button. */
+    fun answerCalendar(context: Context, yes: Boolean) {
+        if (_ui.value.sending || pendingCalendar == null) return
+        send(context, if (yes) "Yes" else "No")
+    }
+
+    /** Calendar access was granted (or not) after Ruby asked for it. */
+    fun calendarAccessResult(context: Context, granted: Boolean) {
+        val app = context.applicationContext
+        _ui.update { it.copy(needsCalendarAccess = false) }
+        if (!granted || pendingCalendar == null) return
+        scope.launch {
+            val text = saveCalendar(app)
+            phoneReply(MemoryStore(app), text, lastCalendarAction.also { lastCalendarAction = null })
+        }
+    }
+
     /** Starts a fresh conversation. Memory keeps the old one, and can recall it from now on. */
     fun newConversation() {
         if (_ui.value.sending) return
         conversationIds.clear()
         tools = null
-        _ui.update { it.copy(turns = emptyList(), error = null, claudeOffer = null) }
+        pendingCalendar = null
+        _ui.update { it.copy(turns = emptyList(), error = null, claudeOffer = null, calendarQuestion = null, needsCalendarAccess = false) }
     }
 
     fun dismissError() = _ui.update { it.copy(error = null) }
@@ -155,6 +234,19 @@ object ChatSession {
 
         scope.launch {
             val memory = MemoryStore(appContext)
+            // A yes or no to Ruby's calendar question is answered on the phone: only then is anything saved.
+            if (pendingCalendar != null && (CalendarText.isYes(message) || CalendarText.isNo(message))) {
+                saveToMemory(memory, MemoryMessage.ROLE_USER, message)
+                if (CalendarText.isYes(message)) {
+                    val text = saveCalendar(appContext)
+                    phoneReply(memory, text, lastCalendarAction.also { lastCalendarAction = null }, speak)
+                } else {
+                    pendingCalendar = null
+                    _ui.update { it.copy(calendarQuestion = null, needsCalendarAccess = false) }
+                    phoneReply(memory, "Okay, I won't change your calendar.", speak = speak)
+                }
+                return@launch
+            }
             // Radio commands are done on the phone, in either engine, without asking any AI.
             RadioCommands.parse(message, Radio.anythingPlaying(appContext), PresetStore(appContext).current())?.let { command ->
                 saveToMemory(memory, MemoryMessage.ROLE_USER, message)
@@ -178,6 +270,7 @@ object ChatSession {
                 sent = ClaudeChat.compose(
                     message, label, now, currentReminders(appContext), currentPlaces(appContext), MemoryRecall.formatRecalled(memories),
                     radio = Radio.note(),
+                    calendars = currentCalendars(appContext),
                 ),
                 memoriesUsed = memories.size,
             )
@@ -210,7 +303,10 @@ object ChatSession {
     /** Claude answers [history] (ending with the user's message). [note] goes under the reply, e.g. why Claude answered. */
     private suspend fun replyWithClaude(appContext: Context, memory: MemoryStore, history: List<ChatTurn>, note: String?) {
         val client = client(appContext)
-        val toolBox = tools ?: ReminderTools(appContext).also { tools = it }
+        val toolBox = tools ?: ToolBoxes(
+            ReminderTools(appContext),
+            CalendarTools(appContext) { action -> proposeCalendar(appContext, action) },
+        ).also { tools = it }
         val alter = breakNextMessage.also { breakNextMessage = false }
         val reply = client.reply(history.takeLast(MAX_TURNS_SENT).dropWhile { !it.fromUser }, toolBox, alter) { soFar ->
             _ui.update { it.copy(replying = soFar) }
@@ -241,6 +337,22 @@ object ChatSession {
                 return
             }
             throw ClaudeChat.ChatError("Free mode isn't available on this phone right now, and there's no Claude key to fall back on.")
+        }
+
+        if (FreeReminders.kindOf(message) == null) {
+            CalendarText.kindOf(message)?.let { kind ->
+                val outcome = freeCalendar(appContext, kind, message)
+                val text = outcome.couldNot?.let { FreeReminders.cantDo(it, claudeOffered = hasKey) } ?: outcome.reply
+                say(text)
+                _ui.update {
+                    it.copy(
+                        turns = it.turns + ChatTurn(fromUser = false, text = text),
+                        claudeOffer = if (outcome.couldNot != null && hasKey) message else null,
+                    )
+                }
+                saveToMemory(memory, MemoryMessage.ROLE_RUBY, text)
+                return
+            }
         }
 
         FreeReminders.kindOf(message)?.let { kind ->
@@ -277,6 +389,61 @@ object ChatSession {
         VoiceSession.replyFinished()
         _ui.update { it.copy(turns = it.turns + ChatTurn(fromUser = false, text = text)) }
         saveToMemory(memory, MemoryMessage.ROLE_RUBY, text)
+    }
+
+    /**
+     * A calendar request in Free mode: Gemini Nano reads it into a small JSON answer, and the phone
+     * checks that before asking the user (adds, changes, deletes) or answering (what's on).
+     */
+    private suspend fun freeCalendar(context: Context, kind: CalendarText.Kind, message: String): FreeReminderRunner.Outcome {
+        val helper = CalendarHelper(context)
+        if (!helper.store.canRead()) {
+            _ui.update { it.copy(needsCalendarAccess = true) }
+            return FreeReminderRunner.Outcome("I need access to your calendar first. Tap Allow calendar access, then ask me again.")
+        }
+        val zone = ZoneId.systemDefault()
+        val now = "${ReminderText.time(System.currentTimeMillis())} (${zone.id})"
+        suspend fun ask(system: String) = FreeMode.write(system, message, maxTokens = 250)
+        fun couldNot(why: String) = FreeReminderRunner.Outcome("", couldNot = why)
+        return when (kind) {
+            CalendarText.Kind.LIST -> {
+                val (from, to) = CalendarText.range(ask(CalendarText.listPrompt(now))) ?: return couldNot("I couldn't tell which day you meant.")
+                val f = runCatching { java.time.LocalDate.parse(from) }.getOrNull() ?: return couldNot("I couldn't tell which day you meant.")
+                val t = runCatching { java.time.LocalDate.parse(to) }.getOrNull()?.takeIf { !it.isBefore(f) } ?: f
+                val day = java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d", java.util.Locale.US)
+                val what = if (t == f) "on ${day.format(f)}" else "from ${day.format(f)} to ${day.format(t)}"
+                FreeReminderRunner.Outcome(CalendarText.listing(helper.between(f, t), what, helper.store.calendars(), zone))
+            }
+            CalendarText.Kind.ADD -> {
+                val calendars = helper.store.calendars()
+                val r = CalendarText.addRequest(ask(CalendarText.addPrompt(now, calendars))) ?: return couldNot("I couldn't make sense of that event.")
+                if (!r.sure) return couldNot("the date or time wasn't clear enough.")
+                helper.add(r.title, r.date, r.time, r.minutes, r.calendar, r.location).fold(
+                    onSuccess = { FreeReminderRunner.Outcome(proposeCalendar(context, it)) },
+                    onFailure = { couldNot(it.message ?: "that event can't be made.") },
+                )
+            }
+            CalendarText.Kind.CHANGE, CalendarText.Kind.DELETE -> {
+                val events = helper.upcoming()
+                if (events.isEmpty()) return FreeReminderRunner.Outcome("There's nothing on your calendar in the coming weeks.")
+                val change = kind == CalendarText.Kind.CHANGE
+                val p = CalendarText.pick(ask(CalendarText.pickPrompt(now, events, change, zone))) ?: return couldNot("I couldn't tell which event you meant.")
+                if (events.none { it.eventId == p.id }) return couldNot("I couldn't tell which event you meant.")
+                val result = if (change) helper.change(p.id, p.title, p.date, p.time, p.minutes, null) else helper.delete(p.id)
+                result.fold(
+                    onSuccess = { FreeReminderRunner.Outcome(proposeCalendar(context, it)) },
+                    onFailure = { couldNot(it.message ?: "that can't be done.") },
+                )
+            }
+        }
+    }
+
+    /** The calendars for the AI's note (null without calendar access). */
+    private suspend fun currentCalendars(context: Context): String? = try {
+        val store = CalendarStore(context)
+        if (store.canRead()) CalendarText.note(store.calendars(), store.defaultId()) else null
+    } catch (e: Exception) {
+        null
     }
 
     /** A reply written on the phone: shown and, if this reply is read aloud, spoken. */
