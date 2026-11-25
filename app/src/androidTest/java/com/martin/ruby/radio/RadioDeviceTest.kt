@@ -11,11 +11,16 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextClearance
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.martin.ruby.chat.ChatSession
 import com.martin.ruby.ui.RadioActions
-import com.martin.ruby.ui.RadioDialog
+import com.martin.ruby.ui.RadioScreen
 import com.martin.ruby.ui.theme.RubyTheme
 import com.martin.ruby.voice.KokoroModel
 import com.martin.ruby.voice.VoiceSession
@@ -53,6 +58,21 @@ class RadioDeviceTest {
         "Plays sound: emulator only",
         Build.HARDWARE in setOf("ranchu", "goldfish") || Build.FINGERPRINT.contains("generic"),
     )
+
+    /** "Play the radio" needs a default station: Martin's profile, for this test (put back afterwards). */
+    private fun withMartinsPresets() = kotlinx.coroutines.runBlocking {
+        val store = PresetStore(context)
+        savedPresets = store.current()
+        store.update { Presets.MARTIN }
+    }
+
+    private var savedPresets: Presets? = null
+
+    @After
+    fun putPresetsBack() = kotlinx.coroutines.runBlocking {
+        savedPresets?.let { p -> PresetStore(context).update { p } }
+        savedPresets = null
+    }
 
     @After
     fun quiet() {
@@ -175,6 +195,7 @@ class RadioDeviceTest {
     @Test
     fun theChatCommands() {
         emulatorOnly()
+        withMartinsPresets()
         instrumentation.runOnMainSync {
             ChatSession.newConversation()
             ChatSession.send(context, "Turn off the radio")
@@ -243,6 +264,7 @@ class RadioDeviceTest {
     @Test
     fun theAI_isToldWhatTheRadioDid() {
         emulatorOnly()
+        withMartinsPresets()
         instrumentation.runOnMainSync {
             ChatSession.newConversation()
             ChatSession.send(context, "Play the radio")
@@ -271,26 +293,133 @@ class RadioDeviceTest {
         assertEquals("WEBN 102.7 plays in the iHeartRadio app, which isn't installed.", said)
     }
 
-    @Test
-    fun theRadioDialog() {
-        var played: Station? = null
-        var afterBriefing = false
+    private fun screen(presets: () -> Presets, onPresets: ((Presets) -> Presets) -> Unit, played: (Station) -> Unit = {}) =
         compose.setContent {
             RubyTheme {
-                RadioDialog(
-                    state = Radio.State(station = Stations.WGRR, playing = true),
-                    afterBriefing = afterBriefing,
-                    actions = RadioActions(onPlay = { played = it }, onAfterBriefing = { afterBriefing = it }),
-                    onClose = {},
+                RadioScreen(
+                    state = Radio.State(),
+                    presets = presets(),
+                    afterBriefing = false,
+                    actions = RadioActions(
+                        onPlay = played,
+                        onPresets = onPresets,
+                        search = { _, text ->
+                            // Stands in for Radio Browser.
+                            listOf(
+                                Station("rb:jazz", "WNKU Jazz 89.7", "Kentucky, USA", "https://example.com/jazz.mp3", null, listOf("WNKU Jazz 89.7"), "jazz"),
+                                Station("rb:webn", "102.7 WEBN", "Ohio, USA", null, 1701),
+                            ).filter { text.isNotBlank() }
+                        },
+                    ),
                 )
             }
         }
-        compose.onNodeWithText("Playing WGRR 103.5").assertIsDisplayed()
-        compose.onNodeWithTag("radio-stop").assertIsDisplayed()
-        compose.onNodeWithText("Cincinnati · opens in iHeartRadio").assertIsDisplayed()
-        compose.onNodeWithTag("radio-play-webn").performClick()
-        assertEquals(Stations.WEBN, played)
-        compose.onNodeWithTag("radio-after-briefing").performClick()
-        assertTrue("The after-briefing switch turns on (off by default)", afterBriefing)
+
+    @Test
+    fun theRadioScreen_newUser_findsSavesAndPlays() {
+        var presets by androidx.compose.runtime.mutableStateOf(Presets())
+        var played: Station? = null
+        screen({ presets }, { change -> presets = change(presets) }, { played = it })
+        compose.onNodeWithText("No stations saved yet. Tap Find a station to add some.").assertIsDisplayed()
+        compose.onNodeWithTag("find-station").performClick()
+        compose.onNodeWithTag("search-field").performTextInput("jazz")
+        compose.onNodeWithTag("search-go").performClick()
+        compose.waitUntil(3_000) { compose.onAllNodesWithTag("result-rb:jazz").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Kentucky, USA · jazz · plays in Ruby").assertIsDisplayed()
+        compose.onNodeWithText("Ohio, USA · opens in iHeartRadio").assertIsDisplayed()
+        compose.onNodeWithTag("save-rb:jazz").performClick()
+        assertEquals(listOf("rb:jazz"), presets.list.map { it.station.id })
+        assertEquals("rb:jazz", presets.default?.station?.id) // the first saved is the default
+        compose.onNodeWithTag("play-rb:jazz").performClick()
+        assertEquals("rb:jazz", played?.id)
     }
+
+    @Test
+    fun theRadioScreen_renameReorderDefaultRemove() {
+        var presets by androidx.compose.runtime.mutableStateOf(Presets.MARTIN)
+        screen({ presets }, { change -> presets = change(presets) })
+        compose.onNodeWithText("WGRR 103.5 (default)").assertIsDisplayed()
+        // Rename WEBN.
+        compose.onNodeWithTag("more-webn").performClick()
+        compose.onNodeWithText("Rename").performClick()
+        compose.onNodeWithTag("rename-field").performTextClearance()
+        compose.onNodeWithTag("rename-field").performTextInput("The Rock")
+        compose.onNodeWithText("Save").performClick()
+        assertEquals("The Rock", presets.list.first { it.station.id == "webn" }.label)
+        // Move it up and make it the default.
+        compose.onNodeWithTag("more-webn").performClick()
+        compose.onNodeWithText("Move up").performClick()
+        assertEquals(listOf("webn", "wgrr"), presets.list.map { it.station.id })
+        compose.onNodeWithTag("more-webn").performClick()
+        compose.onNodeWithText("Make default").performClick()
+        compose.onNodeWithText("The Rock (default)").assertIsDisplayed()
+        // Remove it: WGRR is the default again.
+        compose.onNodeWithTag("more-webn").performClick()
+        compose.onNodeWithText("Remove").performClick()
+        assertEquals(listOf("wgrr"), presets.list.map { it.station.id })
+        assertEquals("wgrr", presets.default?.station?.id)
+    }
+
+    @Test
+    fun presets_areSavedOnThePhone() = kotlinx.coroutines.runBlocking {
+        emulatorOnly()
+        val store = PresetStore(context)
+        val before = store.current()
+        try {
+            store.update { Presets().add(Stations.WEBN).add(Stations.WGRR).makeDefault("wgrr") }
+            val read = PresetStore(context).current()
+            assertEquals(listOf("webn", "wgrr"), read.list.map { it.station.id })
+            assertEquals("wgrr", read.default?.station?.id)
+        } finally {
+            store.update { before }
+        }
+    }
+
+    @Test
+    fun playAPreset_byItsName_withTheSameControls() = kotlinx.coroutines.runBlocking {
+        emulatorOnly()
+        val store = PresetStore(context)
+        val before = store.current()
+        // A saved station named "Test tone", streaming the test tone.
+        val toneStation = Station("rb:tone", "Tone FM", "Test", tone().toString(), null, listOf("Tone FM"))
+        try {
+            store.update { Presets().add(toneStation).rename("rb:tone", "Test tone") }
+            instrumentation.runOnMainSync {
+                ChatSession.newConversation()
+                ChatSession.send(context, "Play test tone")
+            }
+            assertTrue(waitUntil(5_000) { !ChatSession.ui.value.sending })
+            assertEquals("Playing Tone FM.", ChatSession.ui.value.turns.last().text)
+            assertTrue("It plays through the same player", waitUntil(10_000) { Radio.state.value.playing })
+            // ...so the car's pause button stops it, as for any station.
+            val audio = context.getSystemService(AudioManager::class.java)
+            val now = SystemClock.uptimeMillis()
+            audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE, 0))
+            audio.dispatchMediaKeyEvent(KeyEvent(now, now + 50, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PAUSE, 0))
+            assertTrue(waitUntil(3_000) { !Radio.state.value.playing })
+        } finally {
+            store.update { before }
+            instrumentation.runOnMainSync { ChatSession.newConversation() }
+        }
+    }
+
+    @Test
+    fun noPresets_playTheRadio_saysToFindOne() = kotlinx.coroutines.runBlocking {
+        emulatorOnly()
+        val store = PresetStore(context)
+        val before = store.current()
+        try {
+            store.update { Presets() }
+            instrumentation.runOnMainSync {
+                ChatSession.newConversation()
+                ChatSession.send(context, "Play the radio")
+            }
+            assertTrue(waitUntil(5_000) { !ChatSession.ui.value.sending })
+            assertEquals(RadioCommands.NO_STATIONS, ChatSession.ui.value.turns.last().text)
+        } finally {
+            store.update { before }
+            instrumentation.runOnMainSync { ChatSession.newConversation() }
+        }
+    }
+
 }

@@ -10,46 +10,49 @@ class RadioCommandsTest {
 
     private fun play(station: Station) = RadioCommand.Play(station)
 
+    /** Martin's profile: WGRR (default) and WEBN. */
+    private val martin = Presets.MARTIN
+
     @Test
     fun playTheRadio_isWGRR_byDefault() {
-        assertEquals(play(Stations.WGRR), RadioCommands.parse("Play the radio", playing = false))
-        assertEquals(play(Stations.WGRR), RadioCommands.parse("put on the radio please", playing = false))
-        assertEquals(play(Stations.WGRR), RadioCommands.parse("Turn on the radio.", playing = false))
+        assertEquals(play(Stations.WGRR), RadioCommands.parse("Play the radio", playing = false, presets = martin))
+        assertEquals(play(Stations.WGRR), RadioCommands.parse("put on the radio please", playing = false, presets = martin))
+        assertEquals(play(Stations.WGRR), RadioCommands.parse("Turn on the radio.", playing = false, presets = martin))
     }
 
     @Test
     fun stationsByNameOrFrequency_asSpeechRecognitionWritesThem() {
-        assertEquals(play(Stations.WEBN), RadioCommands.parse("Play WEBN", playing = false))
-        assertEquals(play(Stations.WEBN), RadioCommands.parse("play web n", playing = false))
-        assertEquals(play(Stations.WEBN), RadioCommands.parse("put on 102.7", playing = false))
-        assertEquals(play(Stations.WGRR), RadioCommands.parse("Play WGRR", playing = true))
-        assertEquals(play(Stations.WGRR), RadioCommands.parse("switch to 103.5", playing = true))
-        assertEquals(play(Stations.WGRR), RadioCommands.parse("play w g r r", playing = false))
+        assertEquals(play(Stations.WEBN), RadioCommands.parse("Play WEBN", playing = false, presets = martin))
+        assertEquals(play(Stations.WEBN), RadioCommands.parse("play web n", playing = false, presets = martin))
+        assertEquals(play(Stations.WEBN), RadioCommands.parse("put on 102.7", playing = false, presets = martin))
+        assertEquals(play(Stations.WGRR), RadioCommands.parse("Play WGRR", playing = true, presets = martin))
+        assertEquals(play(Stations.WGRR), RadioCommands.parse("switch to 103.5", playing = true, presets = martin))
+        assertEquals(play(Stations.WGRR), RadioCommands.parse("play w g r r", playing = false, presets = martin))
     }
 
     @Test
     fun stop() {
-        assertEquals(RadioCommand.Stop, RadioCommands.parse("Stop the radio", playing = true))
-        assertEquals(RadioCommand.Stop, RadioCommands.parse("turn off the radio", playing = false))
-        assertEquals(RadioCommand.Stop, RadioCommands.parse("Radio off!", playing = true))
+        assertEquals(RadioCommand.Stop, RadioCommands.parse("Stop the radio", playing = true, presets = martin))
+        assertEquals(RadioCommand.Stop, RadioCommands.parse("turn off the radio", playing = false, presets = martin))
+        assertEquals(RadioCommand.Stop, RadioCommands.parse("Radio off!", playing = true, presets = martin))
         // A bare "stop" is for the radio only while it plays; otherwise it's ordinary chat.
-        assertEquals(RadioCommand.Stop, RadioCommands.parse("Stop", playing = true))
-        assertEquals(RadioCommand.Stop, RadioCommands.parse("pause it please", playing = true))
-        assertNull(RadioCommands.parse("Stop", playing = false))
+        assertEquals(RadioCommand.Stop, RadioCommands.parse("Stop", playing = true, presets = martin))
+        assertEquals(RadioCommand.Stop, RadioCommands.parse("pause it please", playing = true, presets = martin))
+        assertNull(RadioCommands.parse("Stop", playing = false, presets = martin))
     }
 
     @Test
     fun ordinaryMessages_areLeftToTheChat() {
-        assertNull(RadioCommands.parse("Play a song by the Beatles", playing = false))
-        assertNull(RadioCommands.parse("What's on the radio tonight?", playing = false))
-        assertNull(RadioCommands.parse("Remind me at 10:35 to call Mom", playing = false))
-        assertNull(RadioCommands.parse("Stop reminding me about the oven", playing = true))
-        assertNull(RadioCommands.parse("I love the radio", playing = false))
+        assertNull(RadioCommands.parse("Play a song by the Beatles", playing = false, presets = martin))
+        assertNull(RadioCommands.parse("What's on the radio tonight?", playing = false, presets = martin))
+        assertNull(RadioCommands.parse("Remind me at 10:35 to call Mom", playing = false, presets = martin))
+        assertNull(RadioCommands.parse("Stop reminding me about the oven", playing = true, presets = martin))
+        assertNull(RadioCommands.parse("I love the radio", playing = false, presets = martin))
     }
 
     @Test
     fun theStations() {
-        assertEquals(Stations.WGRR, Stations.DEFAULT)
+        assertEquals(Stations.WGRR, Presets.MARTIN.default?.station)
         assertTrue(Stations.WGRR.playsInRuby)
         assertTrue(Stations.WGRR.stream!!.contains("streamtheworld.com") && Stations.WGRR.stream!!.contains("WGRRFM"))
         // WEBN's only stream is iHeart's own player stream, so it opens in iHeartRadio.
@@ -60,7 +63,7 @@ class RadioCommandsTest {
     @Test
     fun stopWhileAnotherAppPlays_isForThePhone_notTheAI() {
         // WEBN in iHeartRadio counts as playing: "stop" is a radio command, not chat.
-        assertEquals(RadioCommand.Stop, RadioCommands.parse("stop", playing = true))
+        assertEquals(RadioCommand.Stop, RadioCommands.parse("stop", playing = true, presets = martin))
         assertEquals("Paused WEBN 102.7 in iHeartRadio.", RadioCommands.pauseReply(Stations.WEBN, stopped = true))
         assertEquals(
             "WEBN 102.7 is playing in iHeartRadio. Pause it there or with your steering wheel.",
@@ -97,6 +100,72 @@ class RadioCommandsTest {
         assertTrue(Reconnect.retriable(androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED))
         assertTrue(Reconnect.retriable(androidx.media3.common.PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW))
         assertFalse(Reconnect.retriable(androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED))
+    }
+
+    @Test
+    fun presets_newUsersHaveNone_andPlayTheRadioSaysSo() {
+        assertEquals(RadioCommand.NoStations, RadioCommands.parse("Play the radio", playing = false, presets = Presets()))
+        assertNull(Presets().default)
+        // A station Ruby knows still plays by name.
+        assertEquals(play(Stations.WGRR), RadioCommands.parse("play WGRR", playing = false, presets = Presets()))
+    }
+
+    @Test
+    fun playAPresetByTheNameTheUserGaveIt() {
+        val jazz = Station("rb:123", "WNKU Jazz 89.7", "Kentucky, USA", "https://example.com/jazz.mp3", null, listOf("WNKU Jazz 89.7"), "jazz")
+        val mine = Presets.MARTIN.add(jazz).rename("rb:123", "Sunday jazz")
+        assertEquals(play(jazz), RadioCommands.parse("Play Sunday jazz", playing = false, presets = mine))
+        assertEquals(play(jazz), RadioCommands.parse("put on sunday jazz please", playing = false, presets = mine))
+        // Its station name still works too, and the default is unchanged.
+        assertEquals(play(jazz), RadioCommands.parse("play WNKU Jazz 89.7", playing = false, presets = mine))
+        assertEquals(play(Stations.WGRR), RadioCommands.parse("play the radio", playing = false, presets = mine))
+    }
+
+    @Test
+    fun presets_addRenameReorderDefaultRemove() {
+        val a = Station("a", "Alpha FM", "", "https://a", null)
+        val b = Station("b", "Beta FM", "", "https://b", null)
+        val c = Station("c", "Gamma FM", "", "https://c", null)
+        var p = Presets().add(a).add(b).add(c).add(a) // a twice: saved once
+        assertEquals(listOf("a", "b", "c"), p.list.map { it.station.id })
+        assertEquals("a", p.default?.station?.id) // the first saved becomes the default
+        p = p.move("c", -1).move("c", -1).move("c", -1) // up past the top: stays first
+        assertEquals(listOf("c", "a", "b"), p.list.map { it.station.id })
+        p = p.makeDefault("b").rename("b", "  My Beta  ").rename("a", "   ")
+        assertEquals("b", p.default?.station?.id)
+        assertEquals("My Beta", p.list.first { it.station.id == "b" }.label)
+        assertEquals("Alpha FM", p.list.first { it.station.id == "a" }.label) // a blank name keeps the station's
+        p = p.remove("b") // removing the default: the first left takes over
+        assertEquals("c", p.default?.station?.id)
+        assertEquals(p, Presets.fromJson(p.toJson())) // saved on the phone and read back
+        assertEquals(Presets(), Presets.fromJson(null)) // a new user starts with none
+        assertEquals(Presets.MARTIN, Presets.fromJson(Presets.MARTIN.toJson()))
+    }
+
+    @Test
+    fun radioBrowsersAnswer_andIHeartStreams() {
+        val json = """[
+          {"stationuuid":"u1","name":"WVXU 91.7","url":"http://x","url_resolved":"https://playerservices.example/wvxu.mp3","state":"Ohio","country":"The United States Of America","tags":"news,npr,public radio"},
+          {"stationuuid":"u2","name":"102.7 WEBN","url":"https://stream.revma.ihrhls.com/zc1701","url_resolved":"https://stream.revma.ihrhls.com/zc1701","state":"Cincinnati OH","country":"USA","tags":"rock"},
+          {"stationuuid":"u3","name":"WVXU 91.7","url":"x","url_resolved":"https://playerservices.example/wvxu.mp3","state":"Ohio","country":"USA","tags":""},
+          {"stationuuid":"u4","name":"","url":"x","url_resolved":"https://nameless"}
+        ]"""
+        val found = RadioBrowser.parse(json)
+        assertEquals(listOf("WVXU 91.7", "102.7 WEBN"), found.map { it.name }) // no duplicates, no nameless
+        val wvxu = found[0]
+        assertTrue(wvxu.playsInRuby)
+        assertEquals("rb:u1", wvxu.id)
+        assertEquals("Ohio, The United States Of America", wvxu.city)
+        assertEquals("news, npr", wvxu.genre)
+        // iHeart's own player stream: not played in Ruby; opens in iHeartRadio by its station number.
+        val webn = found[1]
+        assertFalse(webn.playsInRuby)
+        assertEquals(1701, webn.iHeartId)
+        assertTrue(RadioBrowser.url(RadioBrowser.SERVERS[0], RadioBrowser.By.GENRE, "classic rock").contains("tag=classic+rock"))
+        assertTrue(RadioBrowser.url(RadioBrowser.SERVERS[0], RadioBrowser.By.PLACE, "Ohio").contains("state=Ohio&hidebroken=true"))
+        // Curated stations are found by search too (WGRR isn't in Radio Browser).
+        assertEquals(listOf(Stations.WGRR), Stations.curatedMatching("WGRR"))
+        assertEquals(Stations.CURATED, Stations.curatedMatching("Cincinnati"))
     }
 
     @Test

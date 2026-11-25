@@ -126,6 +126,8 @@ dependencies {
     // The radio: Android's media player, with a media session for the car's buttons.
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
+    // Some stations in Radio Browser stream as HLS.
+    implementation(libs.media3.hls)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

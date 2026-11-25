@@ -93,6 +93,7 @@ data class MainActions(
     val onOpenMemory: () -> Unit = {},
     val onOpenReminders: () -> Unit = {},
     val onOpenBriefing: () -> Unit = {},
+    val onOpenRadio: () -> Unit = {},
     val onTestGps: () -> Unit = {},
     val onClearLog: () -> Unit = {},
 )
@@ -106,7 +107,6 @@ data class RubyUi(
     /** The live audio level for the orb (see VoiceSession.liveLevel). */
     val liveLevel: () -> Float = { -1f },
     val radio: Radio.State = Radio.State(),
-    val radioAfterBriefing: Boolean = false,
     val radioActions: RadioActions = RadioActions(),
 )
 
@@ -121,7 +121,7 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
         verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        RubySection(ruby, onOpenChat = actions.onOpenChat, onOpenBriefing = actions.onOpenBriefing)
+        RubySection(ruby, onOpenChat = actions.onOpenChat, onOpenBriefing = actions.onOpenBriefing, onOpenRadio = actions.onOpenRadio)
         Spacer(Modifier.height(24.dp))
         HorizontalDivider()
         Spacer(Modifier.height(24.dp))
@@ -232,19 +232,18 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
  * In debug builds a long press on the orb shows each of its states in turn.
  */
 @Composable
-private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit, onOpenBriefing: () -> Unit) {
+private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit, onOpenBriefing: () -> Unit, onOpenRadio: () -> Unit) {
     val chat = ruby.chat
     val voice = ruby.voice
     var showVoice by rememberSaveable { mutableStateOf(false) }
     var showAi by rememberSaveable { mutableStateOf(false) }
-    var showRadio by rememberSaveable { mutableStateOf(false) }
     var demo by remember { mutableStateOf<OrbState?>(null) }
     val shown = demo ?: orbStateFor(chat, voice)
 
     FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         if (voice.speaking) TextButton(onClick = ruby.chatActions.onStopSpeaking) { Text("Stop talking") }
         if (ruby.radio.on) TextButton(onClick = ruby.radioActions.onStop) { Text("Stop radio") }
-        TextButton(onClick = { showRadio = true }) { Text("Radio") }
+        TextButton(onClick = onOpenRadio) { Text("Radio") }
         TextButton(onClick = { showAi = true }) { Text(if (chat.engine == AiEngine.FREE) "AI: Free mode" else "AI: Claude") }
         TextButton(onClick = onOpenBriefing) { Text("Briefing") }
         TextButton(onClick = { showVoice = true }) { Text("Voice and orb") }
@@ -299,7 +298,6 @@ private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit, onOpenBriefing: ()
     ChatErrorDialog(chat, ruby.chatActions.onDismissError)
     if (showVoice) VoiceSettingsDialog(voice, ruby.chatActions, onClose = { showVoice = false })
     if (showAi) AiEngineDialog(chat, ruby.chatActions, onClose = { showAi = false })
-    if (showRadio) RadioDialog(ruby.radio, ruby.radioAfterBriefing, ruby.radioActions, onClose = { showRadio = false })
 }
 
 /** The orb's amber error color for text: bright on dark backgrounds, darker on light ones to stay readable. */

@@ -13,7 +13,7 @@ import com.martin.ruby.chat.ApiKeyStore
 import com.martin.ruby.radio.Radio
 import com.martin.ruby.radio.RadioCommands
 import com.martin.ruby.radio.RadioSettings
-import com.martin.ruby.radio.Stations
+import com.martin.ruby.radio.PresetStore
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import com.martin.ruby.data.PlaceStore
@@ -296,7 +296,8 @@ object MorningBriefing {
             SensingLog.add("Briefing: not starting the radio (she was stopped).")
             return
         }
-        withContext(Dispatchers.Main) { Radio.play(app, Stations.DEFAULT) }
+        val station = PresetStore(app).current().default?.station ?: return
+        withContext(Dispatchers.Main) { Radio.play(app, station) }
     }
 
     /** The briefing written by Gemini Nano on the phone. Throws [FreeMode.Failed]. */

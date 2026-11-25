@@ -157,7 +157,8 @@ object Radio {
      * Returns what Ruby says about it.
      */
     fun play(context: Context, station: Station): String {
-        val stream = station.stream ?: return openInIHeart(context, station)
+        val stream = station.stream
+            ?: return if (station.iHeartId != null) openInIHeart(context, station) else OtherRadioApps.open(context, station)
         playUri(context, Uri.parse(stream), station)
         return "Playing ${station.name}."
     }
