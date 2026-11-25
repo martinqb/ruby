@@ -152,6 +152,26 @@ Permissions in this phase are sensitive (notifications, Do Not Disturb, health, 
 
 **Test:** away from home on mobile data, ask Ruby "Is my PC on?", then "Open Android Studio", and confirm both work and show up in the log.
 
+### Where we left off (Nov 24, 2026)
+
+- **Done and merged:** Phases 1-6, the orb, the morning briefing, Kokoro voice, reminders, and Free mode (Gemini Nano).
+- **Radio (`radio` branch, pushed, not merged):** WGRR inside Ruby, WEBN in iHeartRadio, voice commands, pause from the steering wheel, headset and Bixby, ducking, reconnect, find a station, presets. All 79 emulator tests pass on that branch. Still to do: Martin's phone tests (retest 3: "stop" while iHeartRadio plays; retest 7: 15 minutes on a locked screen; the presets and search tests; the car tests), then merge.
+- **Next: calendar by voice** (below). A first draft is on the `calendar` branch (unfinished, not phone-tested; all 257 unit and 84 emulator tests pass there).
+
+### Next task: calendar by voice
+
+Ruby adds events to the user's calendars by voice, without a Save tap, and works with every calendar on the phone.
+
+- **Approach:** Android's Calendar Provider, the shared store that Samsung Calendar, Google Calendar and other calendar apps all read and sync, so events show up in each app as if added there.
+- **Permissions:** `READ_CALENDAR` (already asked for the briefing) and `WRITE_CALENDAR`, asked the first time she changes the calendar.
+- **Spoken confirmation:** before saving she says the title, date, time and which calendar ("Dentist, Tuesday, December 2 at 9:30 AM, on your Google calendar. Shall I save it?"), and saves only when the user says yes (or taps Yes).
+- **Change and delete events** the same way, and answer "what's on my calendar" from the phone.
+- **Both AI engines:**
+  - Claude: calendar tools that only propose; the phone saves on "yes".
+  - Free mode: Gemini Nano's structured answers, checked by the phone, offering Claude only with a key (as for reminders).
+- **Default calendar:** a setting for which calendar new events go to, so Ruby doesn't ask every time. She uses another one only when the user names it.
+- **Duplicate check:** before saving, look for an event with the same title at about the same time, and say so ("You already have Dentist at 9:30 on Tuesday. Add another?") instead of saving it twice.
+
 ### To-do: not built yet
 
 - **Creator credit for Ruby.** Two versions, decided by the build (not by anything a user can say in chat):
