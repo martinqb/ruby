@@ -20,6 +20,7 @@ astronomy = "v2.1.19"
 orgJson = "20240303"
 genaiPrompt = "1.0.0-beta5"
 media3 = "1.11.1"
+vosk = "0.3.75"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -51,6 +52,7 @@ genai-prompt = { group = "com.google.mlkit", name = "genai-prompt", version.ref 
 media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
 media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
 media3-hls = { group = "androidx.media3", name = "media3-exoplayer-hls", version.ref = "media3" }
+vosk-android = { group = "com.alphacephei", name = "vosk-android", version.ref = "vosk" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

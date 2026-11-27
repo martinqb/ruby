@@ -43,6 +43,8 @@
 
     <!-- Voice: hearing the user when they tap Talk. Asked for the first time they do. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Listening modes: hearing the wake word and conversation with Ruby in the background. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <!-- The morning briefing reads today's events. Asked only when the briefing is turned on. -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
@@ -100,6 +102,12 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+
+        <!-- Listening modes in the background (wake word, conversation, talking over Ruby). -->
+        <service
+            android:name=".listening.ListeningService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <service
             android:name=".sensing.SensingService"

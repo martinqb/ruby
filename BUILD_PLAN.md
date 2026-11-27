@@ -150,11 +150,12 @@ Permissions in this phase are sensitive (notifications, Do Not Disturb, health, 
 
 **Test:** away from home on mobile data, ask Ruby "Is my PC on?", then "Open Android Studio", and confirm both work and show up in the log.
 
-## Where we left off (Nov 24, 2026)
+## Where we left off (Nov 27, 2026)
 
 - **Done and merged:** Phases 1-6, the orb, the morning briefing, Kokoro voice, reminders, and Free mode (Gemini Nano).
-- **Radio (`radio` branch, pushed, not merged):** WGRR inside Ruby, WEBN in iHeartRadio, voice commands, pause from the steering wheel, headset and Bixby, ducking, reconnect, find a station, presets. All 79 emulator tests pass on that branch. Still to do: Martin's phone tests (retest 3: "stop" while iHeartRadio plays; retest 7: 15 minutes on a locked screen; the presets and search tests; the car tests), then merge.
-- **Next: calendar by voice** (below). A first draft is on the `calendar` branch (unfinished, not phone-tested; all 257 unit and 84 emulator tests pass there).
+- **Radio (`radio` branch, pushed, not merged):** WGRR inside Ruby, WEBN in iHeartRadio, voice commands, pause from the car's touchscreen, headset and Bixby (the Corolla has no steering wheel pause button), ducking, reconnect, find a station, presets. Last commit `4162fd5`: "stop" stops whatever is playing (Ruby's player first, then any outside app) and only says so after checking; WEBN's button says "Play", and "Open" only while WEBN plays in iHeartRadio. Phone tests passed: home tests 1-6 (test 7, playing both at once, can't happen, which is fine) and the car tests (touchscreen pause and play, voice "stop", locked phone). Still to confirm: the earlier presets and search tests. Then merge.
+- **Listening modes (`listening-modes` branch, local only, nothing committed):** built on top of `radio`. A Voice settings page with a Listening on/off switch and three tick boxes that combine, each with a description: Conversation mode (the mic reopens after she answers; "that's all", "stop listening", "goodbye" or silence ends it), Wake word (editable box beside it, default "Hey Ruby"; on-device Vosk, 41 MB model downloaded once on Wi-Fi) and Full duplex (talk over her to interrupt; echo cancellation plus ignoring her own words). Background listening runs in a foreground service with a mic notification; quick off from a main-screen chip and the notification. 261 unit tests and 87 of 88 emulator tests pass (the failure is the Kokoro download, blocked on this PC). Installed on Martin's phone Nov 24; its 13 phone tests haven't been reported yet. Known gaps: the first words when talking over her may be lost; open Ruby once after a restart; in the car she still uses the phone's mic.
+- **Calendar by voice** (below): a first draft is on the `calendar` branch (unfinished, not phone-tested; all 257 unit and 84 emulator tests pass there).
 
 ## Next task: calendar by voice
 

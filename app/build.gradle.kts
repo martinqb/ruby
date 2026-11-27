@@ -128,6 +128,9 @@ dependencies {
     implementation(libs.media3.session)
     // Some stations in Radio Browser stream as HLS.
     implementation(libs.media3.hls)
+    // Listening for the wake word, and for the user talking over Ruby: Vosk, an on-device
+    // recognizer (Apache 2.0) that takes any typed words, with no training or license.
+    implementation(libs.vosk.android)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
