@@ -195,7 +195,7 @@ Ruby adds events to the user's calendars by voice, without a Save tap, and works
 - **Full media player (plan only).** Turn Ruby's radio into a full media player, with the same controls as the radio: voice ("play my podcast", "play [file or folder]"), the steering wheel, headset and Bixby pause, ducking while Ruby talks, and locked-screen playback.
   - **Podcasts:** search and subscribe through a free podcast directory (for example Podcast Index), play episodes inside Ruby, remember where you left off, and optionally download new episodes on Wi-Fi.
   - **Your own music files:** play MP3 and other audio files stored on the phone (pick a file or a folder).
-- **Emergency mesh network (plan only).** Ruby launches or joins a mesh (Meshtastic LoRa, OpenWrt Wi-Fi mesh, Reticulum to link them) so users can message each other when phone service and the internet are down; see BUILD_PLAN.md.
+- **Emergency mesh network (plan only).** Ruby launches or joins a mesh (Meshtastic or MeshCore LoRa, OpenWrt Wi-Fi mesh, Reticulum to link them) so users can message each other when phone service and the internet are down; see BUILD_PLAN.md.
 - **Device discovery and control (plan only).** With the user's permission, Ruby scans for nearby devices (Bluetooth, mDNS, UPnP and more), identifies them and controls them through risk-level plug-ins; see BUILD_PLAN.md.
 
 ## Architecture: the full Ruby
