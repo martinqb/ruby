@@ -156,7 +156,11 @@ object ChatSession {
         scope.launch {
             val memory = MemoryStore(appContext)
             // Radio commands are done on the phone, in either engine, without asking any AI.
-            RadioCommands.parse(message, Radio.anythingPlaying(appContext), PresetStore(appContext).current())?.let { command ->
+            val radioCommand = RadioCommands.parse(
+                message, Radio.anythingPlaying(appContext), PresetStore(appContext).current(), retryOffered = Radio.retryOffered(),
+            )
+            if (radioCommand == null) Radio.forgetRetryOffer()
+            radioCommand?.let { command ->
                 saveToMemory(memory, MemoryMessage.ROLE_USER, message)
                 val reply = when (command) {
                     is RadioCommand.Play -> Radio.play(appContext, command.station)

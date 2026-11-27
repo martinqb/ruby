@@ -66,8 +66,73 @@ class RadioCommandsTest {
         assertEquals(RadioCommand.Stop, RadioCommands.parse("stop", playing = true, presets = martin))
         assertEquals("Paused WEBN 102.7 in iHeartRadio.", RadioCommands.pauseReply(Stations.WEBN, stopped = true))
         assertEquals(
-            "WEBN 102.7 is playing in iHeartRadio. Pause it there or with your steering wheel.",
+            "WEBN 102.7 is still playing in iHeartRadio. Want me to try pausing it again?",
             RadioCommands.pauseReply(Stations.WEBN, stopped = false),
+        )
+    }
+
+    @Test
+    fun yes_afterTheTryAgainOffer_isStop_andOnlyThen() {
+        assertEquals(RadioCommand.Stop, RadioCommands.parse("Yes", playing = true, presets = martin, retryOffered = true))
+        assertEquals(RadioCommand.Stop, RadioCommands.parse("Yes, try again.", playing = true, presets = martin, retryOffered = true))
+        assertEquals(RadioCommand.Stop, RadioCommands.parse("try again", playing = true, presets = martin, retryOffered = true))
+        assertEquals(RadioCommand.Stop, RadioCommands.parse("Sure please.", playing = true, presets = martin, retryOffered = true))
+        // No offer made, or nothing playing any more: a "yes" is for the chat.
+        assertNull(RadioCommands.parse("Yes", playing = true, presets = martin, retryOffered = false))
+        assertNull(RadioCommands.parse("Yes", playing = false, presets = martin, retryOffered = true))
+        // Anything more than a yes is for the chat too.
+        assertNull(RadioCommands.parse("Yes, and what's the weather?", playing = true, presets = martin, retryOffered = true))
+    }
+
+    @Test
+    fun webnsButton_isPlay_exceptWhileItPlaysInIHeartRadio() {
+        val webn = Stations.WEBN
+        assertEquals("Play", Radio.State().buttonLabel(webn))
+        // Opened, but not (or no longer) playing there: back to Play.
+        assertEquals("Play", Radio.State(inIHeart = webn, iHeartPlaying = false).buttonLabel(webn))
+        assertEquals("Open", Radio.State(inIHeart = webn, iHeartPlaying = true).buttonLabel(webn))
+        // Only WEBN's own button changes; stations that play in Ruby are always Play.
+        assertEquals("Play", Radio.State(inIHeart = webn, iHeartPlaying = true).buttonLabel(Stations.WGRR))
+    }
+
+    @Test
+    fun noReplyMentionsASteeringWheel() {
+        for (app in listOf(Stations.WEBN, null)) {
+            val reply = RadioCommands.pauseReply(app, stopped = false)
+            assertFalse(reply, reply.contains("steering", ignoreCase = true))
+            assertTrue(reply, reply.endsWith("Want me to try pausing it again?"))
+        }
+    }
+
+    @Test
+    fun stopReply_onlyClaimsWhatReallyStopped() {
+        val wgrr = Stations.WGRR
+        val webn = Stations.WEBN
+        // Ruby's player didn't end: says so, claims nothing.
+        assertEquals(
+            "I pressed stop, but WGRR 103.5 is still playing. Try the Stop radio button.",
+            RadioCommands.stopReply(wgrr, ourStopped = false, otherPlaying = false, otherStopped = false, app = null),
+        )
+        // Ruby's player ended and nothing else plays.
+        assertEquals("Radio off.", RadioCommands.stopReply(wgrr, ourStopped = true, otherPlaying = false, otherStopped = false, app = null))
+        // Ruby's player ended, then another app was paused too.
+        assertEquals(
+            "Radio off, and paused WEBN 102.7 in iHeartRadio.",
+            RadioCommands.stopReply(wgrr, ourStopped = true, otherPlaying = true, otherStopped = true, app = webn),
+        )
+        assertEquals(
+            "Radio off, and paused the other app.",
+            RadioCommands.stopReply(wgrr, ourStopped = true, otherPlaying = true, otherStopped = true, app = null),
+        )
+        // Ruby's player ended, but the other app kept playing.
+        assertEquals(
+            "Radio off. Something's still playing in another app. Want me to try pausing it again?",
+            RadioCommands.stopReply(wgrr, ourStopped = true, otherPlaying = true, otherStopped = false, app = null),
+        )
+        // Only another app was playing.
+        assertEquals(
+            "Paused WEBN 102.7 in iHeartRadio.",
+            RadioCommands.stopReply(null, ourStopped = true, otherPlaying = true, otherStopped = true, app = webn),
         )
     }
 

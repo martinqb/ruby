@@ -26,6 +26,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -37,6 +38,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.martin.ruby.radio.Preset
 import com.martin.ruby.radio.Presets
 import com.martin.ruby.radio.Radio
@@ -54,6 +58,8 @@ data class RadioActions(
     val onPresets: ((Presets) -> Presets) -> Unit = {},
     /** Searches for stations; throws if nothing could be reached. */
     val search: suspend (RadioBrowser.By, String) -> List<Station> = { _, _ -> emptyList() },
+    /** The radio screen came (back) into view: look again at what's playing in other apps. */
+    val onVisible: () -> Unit = {},
     val onBack: () -> Unit = {},
 )
 
@@ -63,6 +69,12 @@ fun RadioScreen(state: Radio.State, presets: Presets, afterBriefing: Boolean, ac
     val small = MaterialTheme.typography.bodySmall
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     var finding by rememberSaveable { mutableStateOf(false) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) actions.onVisible() }
+        lifecycle.addObserver(observer) // also fires now if the screen is already showing
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         TextButton(onClick = actions.onBack) { Text("Back") }
         Text("Radio", style = MaterialTheme.typography.headlineSmall)
@@ -72,7 +84,7 @@ fun RadioScreen(state: Radio.State, presets: Presets, afterBriefing: Boolean, ac
         when {
             state.starting -> Text("Tuning in to ${state.station?.name}…", style = MaterialTheme.typography.titleSmall)
             state.playing -> Text("Playing ${state.station?.name}", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-            state.inIHeart != null -> Text("${state.inIHeart.name} is in iHeartRadio", style = MaterialTheme.typography.titleSmall)
+            state.inIHeart != null && state.iHeartPlaying -> Text("${state.inIHeart.name} is playing in iHeartRadio", style = MaterialTheme.typography.titleSmall)
         }
         state.problem?.let { Text(it, style = small, color = MaterialTheme.colorScheme.error) }
         if (state.on) OutlinedButton(onClick = actions.onStop, modifier = Modifier.testTag("radio-stop")) { Text("Stop radio") }
@@ -97,13 +109,13 @@ fun RadioScreen(state: Radio.State, presets: Presets, afterBriefing: Boolean, ac
             Text("No stations saved yet. Tap Find a station to add some.", style = small, color = muted)
         }
         presets.list.forEachIndexed { i, preset ->
-            PresetRow(preset, isDefault = preset == presets.default, first = i == 0, last = i == presets.list.lastIndex, actions)
+            PresetRow(preset, isDefault = preset == presets.default, first = i == 0, last = i == presets.list.lastIndex, label = state.buttonLabel(preset.station), actions)
         }
 
         if (finding) {
             Spacer(Modifier.height(8.dp))
             HorizontalDivider()
-            FindStation(presets, actions)
+            FindStation(state, presets, actions)
             HorizontalDivider()
         }
 
@@ -127,8 +139,8 @@ fun RadioScreen(state: Radio.State, presets: Presets, afterBriefing: Boolean, ac
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            "Tap Talk and say \"play the radio\" (your default), \"play\" and a station's name, or \"stop\". The steering " +
-                "wheel's pause, a headset or \"Hi Bixby, pause\" stop it too. It goes quieter while Ruby talks or listens, " +
+            "Tap Talk and say \"play the radio\" (your default), \"play\" and a station's name, or \"stop\". Pause on " +
+                "your car's screen, a headset or \"Hi Bixby, pause\" stop it too. It goes quieter while Ruby talks or listens, " +
                 "keeps playing with the screen locked, and reconnects if the stream drops.",
             style = small, color = muted,
         )
@@ -136,7 +148,7 @@ fun RadioScreen(state: Radio.State, presets: Presets, afterBriefing: Boolean, ac
 }
 
 @Composable
-private fun PresetRow(preset: Preset, isDefault: Boolean, first: Boolean, last: Boolean, actions: RadioActions) {
+private fun PresetRow(preset: Preset, isDefault: Boolean, first: Boolean, last: Boolean, label: String, actions: RadioActions) {
     var menu by remember { mutableStateOf(false) }
     var renaming by remember { mutableStateOf(false) }
     val id = preset.station.id
@@ -146,7 +158,7 @@ private fun PresetRow(preset: Preset, isDefault: Boolean, first: Boolean, last: 
             Text(describe(preset.station), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Button(onClick = { actions.onPlay(preset.station) }, modifier = Modifier.testTag("play-$id")) {
-            Text(if (preset.station.playsInRuby) "Play" else "Open")
+            Text(label)
         }
         Column {
             TextButton(onClick = { menu = true }, modifier = Modifier.testTag("more-$id")) { Text("⋮") }
@@ -179,7 +191,7 @@ private fun PresetRow(preset: Preset, isDefault: Boolean, first: Boolean, last: 
 }
 
 @Composable
-private fun FindStation(presets: Presets, actions: RadioActions) {
+private fun FindStation(state: Radio.State, presets: Presets, actions: RadioActions) {
     var text by rememberSaveable { mutableStateOf("") }
     var by by rememberSaveable { mutableStateOf(RadioBrowser.By.NAME) }
     var results by remember { mutableStateOf<List<Station>?>(null) }
@@ -226,7 +238,7 @@ private fun FindStation(presets: Presets, actions: RadioActions) {
                         Text(s.name, style = MaterialTheme.typography.bodyLarge)
                         Text(describe(s), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    TextButton(onClick = { actions.onPlay(s) }) { Text(if (s.playsInRuby) "Play" else "Open") }
+                    TextButton(onClick = { actions.onPlay(s) }) { Text(state.buttonLabel(s)) }
                     if (presets.has(s)) {
                         Text("Saved", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 8.dp))
                     } else {

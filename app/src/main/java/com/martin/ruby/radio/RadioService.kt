@@ -15,19 +15,23 @@ import com.martin.ruby.log.SensingLog
  * Plays the radio: Android's media player (ExoPlayer) in a media foreground service, so it
  * keeps playing with the screen off and shows the usual player controls. While playing it holds
  * a wake lock and a Wi-Fi lock (network wake mode), so the phone doesn't sleep or drop Wi-Fi
- * under it. Its media session takes the car's steering-wheel buttons, a headset's and a voice
- * assistant's pause. It also:
+ * under it. Its media session is what the car shows on its screen over Bluetooth (the station and
+ * "Ruby's radio"), and takes the car screen's play and pause, a headset's and a voice
+ * assistant's. It also:
  * - turns itself down while Ruby talks (Android's audio focus: her voice asks others to duck),
  * - stops when the car's Bluetooth audio disconnects ("becoming noisy"), so it doesn't carry on
  *   from the phone's speaker,
  * - reconnects by itself if the stream drops (a Wi-Fi handoff, a dead zone), trying again a few
- *   times with growing gaps ([Reconnect]).
+ *   times with growing gaps ([Reconnect]),
+ * - after a pause (on the car's screen, say), play rejoins the live broadcast rather than the
+ *   old audio it had buffered.
  */
 class RadioService : MediaSessionService() {
 
     private var session: MediaSession? = null
     private val handler = Handler(Looper.getMainLooper())
     private val reconnect = Reconnect()
+    private var pausedAt = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -42,6 +46,18 @@ class RadioService : MediaSessionService() {
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) reconnect.playing()
+            }
+
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (reason != Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST || player.mediaItemCount == 0) return
+                if (!playWhenReady) {
+                    pausedAt = android.os.SystemClock.elapsedRealtime()
+                } else if (pausedAt != 0L) {
+                    pausedAt = 0
+                    // Live radio: back to now, not where it was paused.
+                    player.seekToDefaultPosition()
+                    if (player.playbackState == Player.STATE_IDLE) player.prepare()
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {

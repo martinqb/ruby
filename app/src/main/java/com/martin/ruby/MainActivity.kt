@@ -185,6 +185,7 @@ class MainActivity : ComponentActivity() {
                         onStop = { Radio.stop(applicationContext) },
                         onOpenInIHeart = { Radio.openInIHeart(applicationContext, it) },
                         onOpenInOtherApp = { OtherRadioApps.open(applicationContext, it) },
+                        onVisible = { Radio.refreshOtherApps(applicationContext) },
                         onAfterBriefing = { on -> lifecycleScope.launch { RadioSettings(applicationContext).setStartAfterBriefing(on) } },
                         onPresets = { change -> lifecycleScope.launch { PresetStore(applicationContext).update(change) } },
                         search = RadioSearch::search,

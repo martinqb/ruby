@@ -51,8 +51,14 @@ object Radio {
         /** A station opened in the iHeartRadio app, and when (it plays there, not in Ruby). */
         val inIHeart: Station? = null,
         val inIHeartSince: Long = 0,
+        /** Whether [inIHeart] is playing there right now (audio is playing and it isn't Ruby's own radio). */
+        val iHeartPlaying: Boolean = false,
     ) {
         val on: Boolean get() = playing || starting
+
+        /** A station's button: "Open" only while that station plays in iHeartRadio, else "Play". */
+        fun buttonLabel(station: Station): String =
+            if (!station.playsInRuby && iHeartPlaying && inIHeart?.id == station.id) "Open" else "Play"
     }
 
     const val IHEART_PACKAGE = "com.clearchannel.iheartradio.controller"
@@ -167,9 +173,12 @@ object Radio {
     internal fun playUri(context: Context, uri: Uri, station: Station) {
         record("played ${station.name} in Ruby")
         _state.value = State(station = station, starting = true)
+        val generation = ++playGeneration
         scope.launch {
             try {
                 val c = controller(context)
+                // Stopped (or another station chosen) while connecting: don't start it after all.
+                if (generation != playGeneration) return@launch
                 c.setMediaItem(
                     MediaItem.Builder()
                         .setUri(uri)
@@ -189,36 +198,90 @@ object Radio {
     /** Stops Ruby's radio (the Stop buttons). Returns what Ruby says. */
     fun stop(context: Context): String {
         if (!_state.value.on) return "The radio isn't on."
+        stopOwnPlayer()
+        record("stopped the radio in Ruby")
+        return "Radio off."
+    }
+
+    /** Tells Ruby's player to stop and forget the station (a start still on its way is dropped too). */
+    private fun stopOwnPlayer() {
+        playGeneration++
         controller?.run {
             stop()
             clearMediaItems()
         }
         _state.value = _state.value.copy(station = null, playing = false, starting = false, problem = null)
-        record("stopped the radio in Ruby")
-        return "Radio off."
+    }
+
+    /** Whether Ruby's own player has really ended (the controller says so, not just what we asked). */
+    private fun ownPlayerEnded(): Boolean {
+        val c = controller ?: return true
+        return !c.isPlaying && (c.playbackState == Player.STATE_IDLE || c.playbackState == Player.STATE_ENDED)
     }
 
     /**
-     * "Stop" said in the chat: stops Ruby's radio, or if another app is playing (like WEBN in
-     * iHeartRadio), presses pause through Android's media controls and checks it worked. Returns
-     * what Ruby says, true to what happened.
+     * "Stop" said in the chat (or by voice): stops whatever is playing. Ruby's own player first,
+     * checked until it has really ended; then, if another app is still playing (like WEBN in
+     * iHeartRadio), presses pause through Android's media controls and checks that too. Returns
+     * what Ruby says, only claiming what the phone saw stop.
      */
-    suspend fun stopSaid(context: Context): String {
-        if (_state.value.on) return stop(context)
+    suspend fun stopSaid(context: Context): String = withContext(Dispatchers.Main) { stopEverything(context) }
+
+    private suspend fun stopEverything(context: Context): String {
         val audio = context.getSystemService(AudioManager::class.java)
         val app = _state.value.inIHeart?.takeIf { recentIHeart(_state.value) }
-        if (!audio.isMusicActive) return if (app != null) "${app.name} isn't playing right now." else "The radio isn't on."
-        pauseWhateverPlays(context)
-        var stopped = false
-        repeat(10) {
-            kotlinx.coroutines.delay(150)
-            if (!audio.isMusicActive) {
-                stopped = true
-                return@repeat
-            }
+        val ours = _state.value.station?.takeIf { _state.value.on }
+        if (ours == null && !audio.isMusicActive) {
+            retryOfferedAt = 0
+            return if (app != null) "${app.name} isn't playing right now." else "The radio isn't on."
         }
-        record(if (stopped) "paused ${app?.name ?: "another app"}" else "pressed pause, but ${app?.name ?: "the other app"} kept playing")
-        return RadioCommands.pauseReply(app, stopped)
+
+        // 1. Ruby's own player.
+        var otherPlaying = true
+        if (ours != null) {
+            stopOwnPlayer()
+            if (!waitFor(OWN_STOP_MS) { ownPlayerEnded() }) {
+                record("pressed stop, but ${ours.name} kept playing in Ruby")
+                return RadioCommands.stopReply(ours, ourStopped = false, otherPlaying = false, otherStopped = false, app = app)
+            }
+            record("stopped ${ours.name} in Ruby")
+            // Android's "music playing" lags a moment behind Ruby's player: still on after that means another app.
+            otherPlaying = !waitFor(SETTLE_MS) { !audio.isMusicActive }
+        }
+
+        // 2. Anything else still playing: pause, and if the app ignores that, stop.
+        var otherStopped = false
+        if (otherPlaying) {
+            for (key in listOf(KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_STOP)) {
+                pressMediaKey(context, key)
+                otherStopped = waitFor(OTHER_STOP_MS) { !audio.isMusicActive }
+                if (otherStopped) break
+            }
+            record(if (otherStopped) "paused ${app?.name ?: "another app"}" else "pressed pause, but ${app?.name ?: "the other app"} kept playing")
+        }
+        // Offer to try again only when something really is still playing.
+        retryOfferedAt = if (otherPlaying && !otherStopped) SystemClock.elapsedRealtime() else 0
+        return RadioCommands.stopReply(ours, ourStopped = true, otherPlaying = otherPlaying, otherStopped = otherStopped, app = app)
+    }
+
+    private var retryOfferedAt = 0L
+
+    /** Whether Ruby just offered to try pausing again, so a "yes" means "stop" (good for two minutes). */
+    fun retryOffered(): Boolean = retryOfferedAt != 0L && SystemClock.elapsedRealtime() - retryOfferedAt < RETRY_OFFER_MS
+
+    /** The chat moved on to something else: a later "yes" is for the AI, not the radio. */
+    fun forgetRetryOffer() {
+        retryOfferedAt = 0
+    }
+
+    /** Checks [done] every 100 ms for up to [ms]; true as soon as it holds. */
+    private suspend fun waitFor(ms: Long, done: () -> Boolean): Boolean {
+        val until = SystemClock.elapsedRealtime() + ms
+        while (true) {
+            if (done()) return true
+            if (SystemClock.elapsedRealtime() >= until) return false
+            kotlinx.coroutines.delay(100)
+        }
     }
 
     /** Opens [station] in the iHeartRadio app (the fallback). Returns what Ruby says. */
@@ -231,7 +294,7 @@ object Radio {
         for (link in links) {
             try {
                 app.startActivity(Intent(Intent.ACTION_VIEW, link).setPackage(IHEART_PACKAGE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                remember(station)
+                remember(app, station)
                 return "Opening ${station.name} in iHeartRadio."
             } catch (e: ActivityNotFoundException) {
                 // try the next link
@@ -240,27 +303,64 @@ object Radio {
         // No station link (or it failed): open the app itself.
         app.packageManager.getLaunchIntentForPackage(IHEART_PACKAGE)?.let {
             app.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            remember(station)
+            remember(app, station)
             return "Opening iHeartRadio; look for ${station.name} there."
         }
         return "${station.name} plays in the iHeartRadio app, which isn't installed."
     }
 
     /** A station now plays in iHeartRadio: Ruby's own radio stops, so the two don't play at once. */
-    private fun remember(station: Station) {
-        if (_state.value.on) controller?.run {
-            stop()
-            clearMediaItems()
+    private fun remember(context: Context, station: Station) {
+        if (_state.value.on) {
+            playGeneration++
+            controller?.run {
+                stop()
+                clearMediaItems()
+            }
         }
         record("opened ${station.name} in the iHeartRadio app")
         _state.value = State(inIHeart = station, inIHeartSince = SystemClock.elapsedRealtime())
+        watchOtherApps(context)
     }
 
-    private fun pauseWhateverPlays(context: Context) {
+    private var watchingOtherApps = false
+
+    /**
+     * Follows other apps' playing (Android tells Ruby whenever any app starts or stops audio), so
+     * a station's button goes back to "Play" once iHeartRadio stops or is closed.
+     */
+    private fun watchOtherApps(context: Context) {
+        val app = context.applicationContext
+        if (!watchingOtherApps) {
+            watchingOtherApps = true
+            val handler = android.os.Handler(android.os.Looper.getMainLooper())
+            app.getSystemService(AudioManager::class.java).registerAudioPlaybackCallback(
+                object : AudioManager.AudioPlaybackCallback() {
+                    override fun onPlaybackConfigChanged(configs: MutableList<android.media.AudioPlaybackConfiguration>) {
+                        refreshOtherApps(app)
+                        // Android's "music playing" can lag the change a moment: look again.
+                        handler.postDelayed({ refreshOtherApps(app) }, 600)
+                    }
+                },
+                handler,
+            )
+        }
+        refreshOtherApps(app)
+    }
+
+    /** Looks again at whether the station opened in iHeartRadio is playing there (also when the radio screen comes back). */
+    fun refreshOtherApps(context: Context) {
+        val s = _state.value
+        val playing = s.inIHeart != null && !s.on && context.getSystemService(AudioManager::class.java).isMusicActive
+        if (playing != s.iHeartPlaying) _state.value = s.copy(iHeartPlaying = playing)
+    }
+
+    /** Presses a media key for whichever app is playing (Android sends it to the playing app's media session). */
+    private fun pressMediaKey(context: Context, key: Int) {
         val audio = context.getSystemService(AudioManager::class.java)
         val now = SystemClock.uptimeMillis()
-        audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PAUSE, 0))
-        audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PAUSE, 0))
+        audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_DOWN, key, 0))
+        audio.dispatchMediaKeyEvent(KeyEvent(now, now, KeyEvent.ACTION_UP, key, 0))
     }
 
     private var watchingListening = false
@@ -276,15 +376,26 @@ object Radio {
         }
     }
 
+    /** For tests: whether Ruby's own player is still playing (main thread). */
+    internal fun ownPlayerPlaying(): Boolean = !ownPlayerEnded()
+
     /** For tests: the player's own volume (the listening dip; Ruby's voice ducks it through audio focus). */
     internal val volume: Float get() = controller?.volume ?: 1f
 
+    /** Counts plays and stops, so a start that's still connecting knows it was stopped meanwhile. */
+    private var playGeneration = 0
+
+    private const val OWN_STOP_MS = 2_000L
+    private const val SETTLE_MS = 1_000L
+    private const val OTHER_STOP_MS = 1_500L
+    private const val RETRY_OFFER_MS = 2 * 60_000L
     private const val IHEART_RECENT_MS = 6 * 60 * 60_000L
     private const val LOG_KEPT = 5
 
     /** For tests: as if [station] had just been opened in iHeartRadio. */
-    internal fun pretendOpenedInIHeart(station: Station?) {
+    internal fun pretendOpenedInIHeart(station: Station?, context: Context? = null) {
         _state.value = if (station == null) State() else State(inIHeart = station, inIHeartSince = SystemClock.elapsedRealtime())
+        if (station != null && context != null) watchOtherApps(context)
     }
 
     private val NETWORK_ERRORS = setOf(

@@ -237,7 +237,7 @@ class RadioDeviceTest {
             try {
                 assertTrue(waitUntil(3_000) { Radio.anythingPlaying(context) })
                 assertEquals(
-                    "WEBN 102.7 is playing in iHeartRadio. Pause it there or with your steering wheel.",
+                    "WEBN 102.7 is still playing in iHeartRadio. Want me to try pausing it again?",
                     kotlinx.coroutines.runBlocking { Radio.stopSaid(context) },
                 )
                 // And "stop" in the chat goes to the phone, not the AI.
@@ -247,7 +247,7 @@ class RadioDeviceTest {
                 }
                 assertTrue(waitUntil(5_000) { !ChatSession.ui.value.sending })
                 assertEquals(
-                    "WEBN 102.7 is playing in iHeartRadio. Pause it there or with your steering wheel.",
+                    "WEBN 102.7 is still playing in iHeartRadio. Want me to try pausing it again?",
                     ChatSession.ui.value.turns.last().text,
                 )
             } finally {
@@ -258,6 +258,106 @@ class RadioDeviceTest {
                 Radio.pretendOpenedInIHeart(null)
                 ChatSession.newConversation()
             }
+        }
+    }
+
+    @Test
+    fun stopSaid_stopsRubysPlayerFirst_thenTheOtherApp() {
+        emulatorOnly()
+        startTone()
+        val other = otherAppPlaying()
+        try {
+            assertTrue(waitUntil(3_000) { Radio.anythingPlaying(context) })
+            // Ruby's player really ends; the stand-in app ignores pause, and Ruby says so.
+            assertEquals(
+                "Radio off. Something's still playing in another app. Want me to try pausing it again?",
+                kotlinx.coroutines.runBlocking { Radio.stopSaid(context) },
+            )
+            assertFalse(Radio.state.value.on)
+            var ended = false
+            instrumentation.runOnMainSync { ended = !Radio.ownPlayerPlaying() }
+            assertTrue("Ruby's own player should have ended", ended)
+        } finally {
+            other.release()
+        }
+        // With only Ruby playing, it stops and nothing else is touched.
+        startTone()
+        assertEquals("Radio off.", kotlinx.coroutines.runBlocking { Radio.stopSaid(context) })
+        assertFalse(Radio.state.value.on)
+    }
+
+    /**
+     * The car's touchscreen play and pause come over Bluetooth (AVRCP) into Android's media
+     * session service, which sends them on to the playing app's media session. `cmd media_session
+     * dispatch` takes that same route. And what the car's screen shows is the session's metadata.
+     */
+    @Test
+    fun theCarScreensPauseAndPlay_andWhatItShows() {
+        emulatorOnly()
+        startTone()
+        val sessions = shell("dumpsys media_session")
+        assertTrue("Ruby's radio session is listed", sessions.contains("ruby-radio"))
+        assertTrue("It shows the station", sessions.contains("WGRR 103.5"))
+        assertTrue("And that it's Ruby's radio", sessions.contains("Ruby's radio"))
+
+        shell("cmd media_session dispatch pause")
+        assertTrue("The car's pause stops it", waitUntil(3_000) { !Radio.state.value.playing })
+        assertFalse(Radio.state.value.on)
+        shell("cmd media_session dispatch play")
+        assertTrue("The car's play starts it again", waitUntil(5_000) { Radio.state.value.playing })
+        shell("cmd media_session dispatch play-pause")
+        assertTrue("The car's play/pause toggle stops it", waitUntil(3_000) { !Radio.state.value.playing })
+    }
+
+    @Test
+    fun webnsButton_goesBackToPlay_whenIHeartRadioStops() {
+        emulatorOnly()
+        instrumentation.runOnMainSync { Radio.pretendOpenedInIHeart(Stations.WEBN, context) }
+        try {
+            assertEquals("Play", Radio.state.value.buttonLabel(Stations.WEBN))
+            // iHeartRadio starts playing (a stand-in app's audio): Open.
+            val other = otherAppPlaying()
+            try {
+                assertTrue("Open while it plays", waitUntil(3_000) { Radio.state.value.buttonLabel(Stations.WEBN) == "Open" })
+            } finally {
+                other.release() // iHeartRadio closed
+            }
+            assertTrue("Back to Play once it stops", waitUntil(3_000) { Radio.state.value.buttonLabel(Stations.WEBN) == "Play" })
+            // And looking again when the radio screen comes back keeps it Play.
+            instrumentation.runOnMainSync { Radio.refreshOtherApps(context) }
+            assertEquals("Play", Radio.state.value.buttonLabel(Stations.WEBN))
+        } finally {
+            instrumentation.runOnMainSync { Radio.pretendOpenedInIHeart(null) }
+        }
+    }
+
+    @Test
+    fun whenThePauseDoesntTake_rubyOffersToTryAgain_andYesTries() {
+        emulatorOnly()
+        val other = otherAppPlaying()
+        try {
+            assertTrue(waitUntil(3_000) { Radio.anythingPlaying(context) })
+            instrumentation.runOnMainSync {
+                ChatSession.newConversation()
+                ChatSession.send(context, "stop")
+            }
+            assertTrue(waitUntil(8_000) { !ChatSession.ui.value.sending })
+            assertEquals("Something's still playing in another app. Want me to try pausing it again?", ChatSession.ui.value.turns.last().text)
+            assertTrue(Radio.retryOffered())
+            // "Yes" goes to the phone, which tries again (and again is honest that it didn't take).
+            instrumentation.runOnMainSync { ChatSession.send(context, "Yes") }
+            assertTrue(waitUntil(8_000) { !ChatSession.ui.value.sending })
+            assertEquals("Something's still playing in another app. Want me to try pausing it again?", ChatSession.ui.value.turns.last().text)
+            // Once it has stopped, a "yes" is no longer for the radio.
+            other.pause()
+            assertTrue(waitUntil(3_000) { !Radio.anythingPlaying(context) })
+            instrumentation.runOnMainSync { ChatSession.send(context, "stop the radio") }
+            assertTrue(waitUntil(8_000) { !ChatSession.ui.value.sending })
+            assertEquals("The radio isn't on.", ChatSession.ui.value.turns.last().text)
+            assertFalse(Radio.retryOffered())
+        } finally {
+            other.release()
+            instrumentation.runOnMainSync { ChatSession.newConversation() }
         }
     }
 

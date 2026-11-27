@@ -219,16 +219,20 @@ object RadioCommands {
         "^(please )?(stop|pause|turn off|switch off|shut off|kill|mute)( the)? (radio|music|station)( please)?$|^(radio|music) off$"
     )
     private val BARE_STOP = Regex("^(please )?(stop|pause|stop it|pause it|stop that|quiet|enough)( please)?$")
+    /** A yes to "Want me to try pausing it again?" */
+    private val TRY_AGAIN = Regex("^(yes|yeah|yep|yup|sure|ok|okay|please|please do|do it|go ahead|try again|yes,? try again|yes please|yeah please)( please)?$")
 
     /**
      * The radio command in [message], or null for an ordinary message. "Play [name]" plays a
      * saved preset (or a station Ruby knows); "play the radio" plays the default preset. A bare
      * "stop" only counts while something is playing ([playing]: Ruby's radio, or another app such
-     * as iHeartRadio); otherwise it's left to the chat.
+     * as iHeartRadio); otherwise it's left to the chat. A "yes" counts as "stop" only right after
+     * Ruby offered to try pausing again ([retryOffered]) and something still plays.
      */
-    fun parse(message: String, playing: Boolean, presets: Presets = Presets()): RadioCommand? {
+    fun parse(message: String, playing: Boolean, presets: Presets = Presets(), retryOffered: Boolean = false): RadioCommand? {
         val m = message.lowercase().trim().trimEnd('.', '!', '?').trim()
         if (STOP.matches(m) || (playing && BARE_STOP.matches(m))) return RadioCommand.Stop
+        if (playing && retryOffered && TRY_AGAIN.matches(m)) return RadioCommand.Stop
         if (PLAY.containsMatchIn(m)) {
             val asked = PLAY.replaceFirst(m, "").trim()
             presets.find(asked)?.let { return RadioCommand.Play(it.station) }
@@ -253,12 +257,31 @@ object RadioCommands {
             if (log.isEmpty()) "" else " Recently: " + log.joinToString("; ") + "."
     }
 
-    /** What Ruby says after pressing pause for another app: did it stop? */
+    /**
+     * What Ruby says after pressing pause for another app: did it stop? If not, she offers to try
+     * again (a "yes" does), and assumes no button: voice may be the only way to stop it.
+     */
     fun pauseReply(app: Station?, stopped: Boolean): String = when {
         stopped && app != null -> "Paused ${app.name} in iHeartRadio."
         stopped -> "Paused."
-        app != null -> "${app.name} is playing in iHeartRadio. Pause it there or with your steering wheel."
-        else -> "Something's playing in another app. Pause it there or with your steering wheel."
+        app != null -> "${app.name} is still playing in iHeartRadio. $TRY_AGAIN_OFFER"
+        else -> "Something's still playing in another app. $TRY_AGAIN_OFFER"
+    }
+
+    const val TRY_AGAIN_OFFER = "Want me to try pausing it again?"
+
+    /**
+     * What Ruby says after "stop", true to what the phone checked: [ours] is the station Ruby's own
+     * player was playing (null if none), [ourStopped] whether it really ended, [otherPlaying]
+     * whether another app was still playing after that, and [otherStopped] whether pausing it worked.
+     */
+    fun stopReply(ours: Station?, ourStopped: Boolean, otherPlaying: Boolean, otherStopped: Boolean, app: Station?): String = when {
+        ours != null && !ourStopped -> "I pressed stop, but ${ours.name} is still playing. Try the Stop radio button."
+        ours == null -> pauseReply(app, otherStopped)
+        !otherPlaying -> "Radio off."
+        otherStopped && app != null -> "Radio off, and paused ${app.name} in iHeartRadio."
+        otherStopped -> "Radio off, and paused the other app."
+        else -> "Radio off. " + pauseReply(app, stopped = false)
     }
 
     /** After the morning briefing in the car: start the radio if that's on and she wasn't stopped. */
