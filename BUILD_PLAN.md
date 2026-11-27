@@ -193,6 +193,15 @@ Ruby adds events to the user's calendars by voice, without a Save tap, and works
 - **Full media player (plan only).** Turn Ruby's radio into a full media player, with the same controls as the radio: voice ("play my podcast", "play [file or folder]"), the steering wheel, headset and Bixby pause, ducking while Ruby talks, and locked-screen playback.
   - **Podcasts:** search and subscribe through a free podcast directory (for example Podcast Index), play episodes inside Ruby, remember where you left off, and optionally download new episodes on Wi-Fi.
   - **Your own music files:** play MP3 and other audio files stored on the phone (pick a file or a folder).
+- **Emergency mesh network (plan only).** Goal: if phone service or the internet goes down, Ruby users can still talk to each other. Ruby can launch or join a mesh network so a neighborhood can run its own message board, and later link across neighborhoods, cities or states.
+  - **Meshtastic on 915 MHz LoRa:** cheap ESP32 LoRa nodes. Ruby talks to a node over Bluetooth, and the nodes relay messages for miles with no internet.
+  - **Wi-Fi mesh on home routers:** OpenWrt routers running a mesh protocol such as batman-adv link a neighborhood. It's fast enough for a local Ruby message board and photos.
+  - **Reticulum:** links LoRa and Wi-Fi together so separate neighborhoods can connect.
+  - Offline, Ruby runs in Free mode (Gemini Nano), since Claude can't be reached.
+- **Device discovery and control (plan only).** Goal: Ruby regularly scans for nearby devices over every protocol (Bluetooth and BLE, Wi-Fi discovery such as mDNS and UPnP, and others), works out what each one is (maker, model, what it can do) and finds the right driver or instructions so she can operate it. She does this only if the user chooses to allow it.
+  - Each device type is a control plug-in in the services layer, using the existing risk levels: low means she just does it, medium means she confirms first, and high means she confirms and shows the action.
+  - Android limits background scanning, so "always scanning" means frequent check-ins, not nonstop scanning.
+  - Ruby only controls devices the user owns or is allowed to use.
 
 ## Architecture: the full Ruby
 
