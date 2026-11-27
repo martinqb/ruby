@@ -195,6 +195,7 @@ Ruby adds events to the user's calendars by voice, without a Save tap, and works
   - **Your own music files:** play MP3 and other audio files stored on the phone (pick a file or a folder).
 - **Emergency mesh network (plan only).** Goal: if phone service or the internet goes down, Ruby users can still talk to each other. Ruby can launch or join a mesh network so a neighborhood can run its own message board, and later link across neighborhoods, cities or states.
   - **Meshtastic on 915 MHz LoRa:** cheap ESP32 LoRa nodes. Ruby talks to a node over Bluetooth, and the nodes relay messages for miles with no internet.
+  - **MeshCore on 915 MHz LoRa:** another LoRa mesh that runs on the same ESP32 LoRa boards, with dedicated repeater nodes that pass messages along. It's often better than Meshtastic at routing over long distances. Ruby could support either one.
   - **Wi-Fi mesh on home routers:** OpenWrt routers running a mesh protocol such as batman-adv link a neighborhood. It's fast enough for a local Ruby message board and photos.
   - **Reticulum:** links LoRa and Wi-Fi together so separate neighborhoods can connect.
   - Offline, Ruby runs in Free mode (Gemini Nano), since Claude can't be reached.
