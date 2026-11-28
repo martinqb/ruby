@@ -175,6 +175,7 @@ object Radio {
     /** Plays [uri] as [station] (tests play a local file). */
     internal fun playUri(context: Context, uri: Uri, station: Station) {
         record("played ${station.name} in Ruby")
+        stopsReportedFor = 0 // Ruby moved on from iHeartRadio herself: its stopping is no news
         _state.value = State(station = station, starting = true)
         val generation = ++playGeneration
         scope.launch {
@@ -451,12 +452,31 @@ object Radio {
         _state.value = if (playing) s.copy(iHeartPlaying = true, problem = null, station = null) else s.copy(iHeartPlaying = false)
         val station = s.inIHeart
         if (!playing && station != null && stopsReportedFor == iHeartAttempt && stopsReportedFor != 0) {
-            // It had started, and now it's stopped or iHeartRadio was closed: don't leave "is playing" up.
-            stopsReportedFor = 0
-            record("${station.name} stopped in iHeartRadio")
-            _iHeartNews.tryEmit(IHeartNews(iHeartAttempt, station, RadioCommands.iHeartStoppedReply(station), failed = false))
+            // It had started, and now it's quiet. Only tell about it if it stays that way and it was
+            // iHeartRadio's own doing (paused there, or closed): not Ruby starting another station,
+            // and not her mic or voice pausing it for a moment.
+            val attempt = iHeartAttempt
+            val app = context.applicationContext
+            scope.launch {
+                kotlinx.coroutines.delay(STOP_CONFIRM_MS)
+                val now = _state.value
+                if (!RadioCommands.reportIHeartStop(
+                        sameOpening = attempt == iHeartAttempt && stopsReportedFor == attempt && now.inIHeart?.id == station.id,
+                        stillQuiet = !now.iHeartPlaying && !otherAppPlaying(app),
+                        rubysRadioOn = now.on,
+                        rubyBusy = VoiceSession.ui.value.listening || VoiceSession.ui.value.speaking,
+                    )
+                ) return@launch
+                stopsReportedFor = 0
+                record("${station.name} stopped in iHeartRadio")
+                _iHeartNews.tryEmit(IHeartNews(attempt, station, RadioCommands.iHeartStoppedReply(station), failed = false))
+            }
         }
     }
+
+    /** Whether the station opened in iHeartRadio is still the latest thing the radio did (chat checks before saying it stopped). */
+    fun iHeartStillCurrent(attempt: Int, station: Station): Boolean =
+        attempt == iHeartAttempt && !_state.value.on && _state.value.inIHeart?.id == station.id
 
     /** Presses a media key for whichever app is playing (Android sends it to the playing app's media session). */
     private fun pressMediaKey(context: Context, key: Int) {
@@ -490,6 +510,8 @@ object Radio {
 
     private const val OWN_STOP_MS = 2_000L
     private const val RELEASE_MS = 800L
+    /** How long iHeartRadio must stay quiet before Ruby says it stopped. */
+    internal const val STOP_CONFIRM_MS = 3_000L
     private const val SETTLE_MS = 1_000L
     private const val OTHER_STOP_MS = 1_500L
     private const val RETRY_OFFER_MS = 2 * 60_000L

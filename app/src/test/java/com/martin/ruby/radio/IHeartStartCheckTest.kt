@@ -48,6 +48,18 @@ class IHeartStartCheckTest {
     }
 
     @Test
+    fun stoppedInIHeartRadio_isOnlySaid_whenIHeartRadioStoppedOnItsOwn() {
+        assertTrue(RadioCommands.reportIHeartStop(sameOpening = true, stillQuiet = true, rubysRadioOn = false, rubyBusy = false))
+        // Ruby switched to her own station (WGRR, a preset, a searched station): that's what's playing, not news.
+        assertFalse(RadioCommands.reportIHeartStop(sameOpening = true, stillQuiet = true, rubysRadioOn = true, rubyBusy = false))
+        // She opened another station (or WEBN again) since.
+        assertFalse(RadioCommands.reportIHeartStop(sameOpening = false, stillQuiet = true, rubysRadioOn = false, rubyBusy = false))
+        // Her mic or voice paused it a moment, or it came back.
+        assertFalse(RadioCommands.reportIHeartStop(sameOpening = true, stillQuiet = true, rubysRadioOn = false, rubyBusy = true))
+        assertFalse(RadioCommands.reportIHeartStop(sameOpening = true, stillQuiet = false, rubysRadioOn = false, rubyBusy = false))
+    }
+
+    @Test
     fun whatRubySays() {
         val webn = Stations.WEBN
         assertEquals("WEBN 102.7 is playing in iHeartRadio.", RadioCommands.iHeartStartReply(webn, IHeartStart.PLAYING))

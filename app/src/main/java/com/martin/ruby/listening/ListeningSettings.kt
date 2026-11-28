@@ -21,6 +21,7 @@ class ListeningSettings(context: Context) {
         val WAKE_PHRASE = stringPreferencesKey("listening_wake_phrase")
         val FULL_DUPLEX = booleanPreferencesKey("listening_full_duplex")
         val OVERLAY_ASKED = booleanPreferencesKey("listening_overlay_asked")
+        val FULL_SCREEN_ASKED = booleanPreferencesKey("listening_full_screen_asked")
     }
 
     /** Whether Ruby has asked once for "Display over other apps" (to show herself on the wake word). */
@@ -28,6 +29,13 @@ class ListeningSettings(context: Context) {
 
     suspend fun setOverlayAsked() {
         app.dataStore.edit { it[Keys.OVERLAY_ASKED] = true }
+    }
+
+    /** Whether Ruby has asked once for "Full screen notifications" (the fallback when overlays aren't allowed). */
+    val fullScreenAsked: Flow<Boolean> = app.dataStore.data.map { it[Keys.FULL_SCREEN_ASKED] ?: false }
+
+    suspend fun setFullScreenAsked() {
+        app.dataStore.edit { it[Keys.FULL_SCREEN_ASKED] = true }
     }
 
     val prefs: Flow<ListeningPrefs> = app.dataStore.data.map { p ->

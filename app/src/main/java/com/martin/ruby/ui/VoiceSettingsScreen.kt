@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.martin.ruby.listening.Listening
 import com.martin.ruby.listening.ListeningPrefs
 import com.martin.ruby.listening.VoskModel
+import com.martin.ruby.listening.WakeScreen
 import com.martin.ruby.listening.WakePhrase
 
 data class VoiceSettingsActions(
@@ -54,6 +55,11 @@ data class VoiceSettingsActions(
     val askOverScreen: Boolean = false,
     /** The answer to that one-time ask: true opens Android's settings page for it. */
     val onOverScreenAnswer: (Boolean) -> Unit = {},
+    /** Her wake notification may open her view full screen ("Full screen notifications"), the fallback. */
+    val canUseFullScreen: Boolean = true,
+    /** She hasn't asked for that yet (asked once, after "Display over other apps"). */
+    val askFullScreen: Boolean = false,
+    val onFullScreenAnswer: (Boolean) -> Unit = {},
 )
 
 /** Voice settings: how Ruby listens. The three modes combine; the switch pauses them all. */
@@ -61,7 +67,13 @@ data class VoiceSettingsActions(
 fun VoiceSettingsScreen(state: Listening.Ui, hasMic: Boolean, actions: VoiceSettingsActions, modifier: Modifier = Modifier) {
     val prefs = state.prefs
     val small = MaterialTheme.typography.bodySmall
-    if (prefs.wakeWord && actions.askOverScreen && !actions.canShowOverScreen) OverScreenAsk(actions)
+    if (prefs.wakeWord) {
+        when (WakeScreen.ask(actions.canShowOverScreen, !actions.askOverScreen, actions.canUseFullScreen, !actions.askFullScreen)) {
+            WakeScreen.Ask.OVERLAY -> OverScreenAsk(actions)
+            WakeScreen.Ask.FULL_SCREEN -> FullScreenAsk(actions)
+            null -> Unit
+        }
+    }
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         TextButton(onClick = actions.onBack) { Text("Back") }
@@ -188,6 +200,14 @@ private fun WakeWordMode(prefs: ListeningPrefs, enabled: Boolean, actions: Voice
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 TextButton(onClick = { actions.onOverScreenAnswer(true) }, modifier = Modifier.testTag("allow-over-screen")) { Text("Allow") }
+                if (!actions.canUseFullScreen) {
+                    Text(
+                        "\"Full screen notifications\" is off for Ruby too, so with the screen locked she can only turn it on " +
+                            "and show a notification. Turn it on to see her orb.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = { actions.onFullScreenAnswer(true) }, modifier = Modifier.testTag("allow-full-screen")) { Text("Turn on") }
+                }
             }
             if (problem == null && !changed && unknown.isNotEmpty()) {
                 Text(
@@ -215,6 +235,24 @@ private fun OverScreenAsk(actions: VoiceSettingsActions) {
         },
         confirmButton = { TextButton(onClick = { actions.onOverScreenAnswer(true) }, modifier = Modifier.testTag("over-screen-open")) { Text("Open settings") } },
         dismissButton = { TextButton(onClick = { actions.onOverScreenAnswer(false) }, modifier = Modifier.testTag("over-screen-not-now")) { Text("Not now") } },
+    )
+}
+
+/** The one-time ask for "Full screen notifications", when "Display over other apps" isn't allowed. */
+@Composable
+private fun FullScreenAsk(actions: VoiceSettingsActions) {
+    AlertDialog(
+        onDismissRequest = { actions.onFullScreenAnswer(false) },
+        title = { Text("Let Ruby show herself on the lock screen") },
+        text = {
+            Text(
+                "Without \"Display over other apps\", Ruby can still show her orb when you say the wake word with the screen " +
+                    "off, through a notification that opens full screen. Android calls this \"Full screen notifications\", and " +
+                    "it's off for most apps. She never unlocks your phone.",
+            )
+        },
+        confirmButton = { TextButton(onClick = { actions.onFullScreenAnswer(true) }, modifier = Modifier.testTag("full-screen-open")) { Text("Open settings") } },
+        dismissButton = { TextButton(onClick = { actions.onFullScreenAnswer(false) }, modifier = Modifier.testTag("full-screen-not-now")) { Text("Not now") } },
     )
 }
 

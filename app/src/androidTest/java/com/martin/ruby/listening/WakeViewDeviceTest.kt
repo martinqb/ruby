@@ -113,19 +113,54 @@ class WakeViewDeviceTest {
         instrumentation.runOnMainSync { ChatSession.newConversation() }
     }
 
+    private fun screenOffAndLocked() {
+        shell("input keyevent KEYCODE_SLEEP")
+        assertTrue("screen off", waitUntil(5_000) { !power.isInteractive })
+        assertTrue("locked", waitUntil(5_000) { keyguard.isKeyguardLocked })
+    }
+
     @Test
-    fun withoutDisplayOverOtherApps_aNotificationShowsHerInstead() {
+    fun withoutDisplayOverOtherApps_aFullScreenNotificationShowsHer() {
         emulatorOnly()
         shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW deny")
-        assertTrue(waitUntil(3_000) { !WakeScreen.canOpenFromBackground(context) })
-        shell("input keyevent KEYCODE_HOME") // Ruby not on screen
-        assertTrue(waitUntil(3_000) { !WakeScreen.mainShown && !WakeScreen.viewShown })
-        assertTrue(WakeScreen.route(false, WakeScreen.canOpenFromBackground(context)) == WakeScreen.Route.NOTIFICATION)
-        instrumentation.runOnMainSync { WakeScreen.show(context) }
-        val manager = context.getSystemService(android.app.NotificationManager::class.java)
-        assertTrue("the notification is up, or it opened her view", waitUntil(5_000) {
-            manager.activeNotifications.any { it.id == 8 } || WakeScreen.viewShown
-        })
-        WakeScreen.clearNotification(context)
+        shell("appops set ${context.packageName} USE_FULL_SCREEN_INTENT allow")
+        try {
+            assertTrue(waitUntil(3_000) { !WakeScreen.canOpenFromBackground(context) && WakeScreen.canUseFullScreen(context) })
+            screenOffAndLocked()
+            instrumentation.runOnMainSync { WakeScreen.show(context) }
+            assertTrue("the screen comes on", waitUntil(6_000) { power.isInteractive })
+            assertTrue("still locked", keyguard.isKeyguardLocked)
+            assertTrue("her view shows, or at least her notification", waitUntil(5_000) { WakeScreen.viewShown || notificationUp() })
+        } finally {
+            instrumentation.runOnMainSync { ScreenWake.release() }
+            shell("appops set ${context.packageName} USE_FULL_SCREEN_INTENT default")
+            WakeScreen.clearNotification(context)
+        }
     }
+
+    @Test
+    fun withNeitherAllowed_sheStillTurnsTheScreenOn_andKeepsItOnWhileTalking() {
+        emulatorOnly()
+        shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW deny")
+        shell("appops set ${context.packageName} USE_FULL_SCREEN_INTENT deny")
+        try {
+            assertTrue(waitUntil(3_000) { !WakeScreen.canOpenFromBackground(context) && !WakeScreen.canUseFullScreen(context) })
+            assertTrue(WakeScreen.route(false, false, false) == WakeScreen.Route.WAKE_AND_NOTIFY)
+            screenOffAndLocked()
+            instrumentation.runOnMainSync { WakeScreen.show(context) }
+            assertTrue("never a black screen: it comes on", waitUntil(5_000) { power.isInteractive })
+            assertTrue("still locked: she never unlocks it", keyguard.isKeyguardLocked)
+            assertTrue("her notification is up, to tap", waitUntil(5_000) { notificationUp() })
+            assertTrue("held on for the conversation", ScreenWake.holding)
+            // Nothing going on: after the grace time she lets go, and it times out as usual.
+            assertTrue("lets go after", waitUntil(WakeScreen.GRACE_MS + 6_000) { !ScreenWake.holding })
+        } finally {
+            instrumentation.runOnMainSync { ScreenWake.release() }
+            shell("appops set ${context.packageName} USE_FULL_SCREEN_INTENT default")
+            WakeScreen.clearNotification(context)
+        }
+    }
+
+    private fun notificationUp() =
+        context.getSystemService(android.app.NotificationManager::class.java).activeNotifications.any { it.id == WakeScreen.NOTIFICATION_ID }
 }

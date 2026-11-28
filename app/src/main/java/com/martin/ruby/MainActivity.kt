@@ -104,6 +104,7 @@ class MainActivity : ComponentActivity() {
     private var hasBackgroundLocation by mutableStateOf(false)
     private var hasMicPermission by mutableStateOf(false)
     private var canShowOverScreen by mutableStateOf(true)
+    private var canUseFullScreen by mutableStateOf(true)
     private var hasCalendarPermission by mutableStateOf(false)
     private var gpsEnabled by mutableStateOf(true)
     private var batteryOptimized by mutableStateOf(false)
@@ -193,6 +194,7 @@ class MainActivity : ComponentActivity() {
                 val radio by Radio.state.collectAsState()
                 val listening by Listening.ui.collectAsState()
                 val overScreenAsked by remember { ListeningSettings(applicationContext).overlayAsked }.collectAsState(initial = true)
+                val fullScreenAsked by remember { ListeningSettings(applicationContext).fullScreenAsked }.collectAsState(initial = true)
                 val radioAfterBriefing by remember { RadioSettings(applicationContext).startAfterBriefing }.collectAsState(initial = false)
                 val radioPresets by remember { PresetStore(applicationContext).presets }.collectAsState(initial = Presets())
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
@@ -306,6 +308,12 @@ class MainActivity : ComponentActivity() {
                                 onOverScreenAnswer = { open ->
                                     lifecycleScope.launch { ListeningSettings(applicationContext).setOverlayAsked() }
                                     if (open) startActivity(WakeScreen.overlaySettings(this@MainActivity))
+                                },
+                                canUseFullScreen = canUseFullScreen,
+                                askFullScreen = !fullScreenAsked,
+                                onFullScreenAnswer = { open ->
+                                    lifecycleScope.launch { ListeningSettings(applicationContext).setFullScreenAsked() }
+                                    if (open) startActivity(WakeScreen.fullScreenSettings(this@MainActivity))
                                 },
                             ),
                             modifier = modifier,
@@ -461,6 +469,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         WakeScreen.mainShown = true
         canShowOverScreen = WakeScreen.canOpenFromBackground(this)
+        canUseFullScreen = WakeScreen.canUseFullScreen(this)
         // The user may have changed a permission or setting, or the car may have
         // connected while Ruby was closed, so check again whenever the screen comes back.
         checkPermissions()
