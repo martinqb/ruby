@@ -50,6 +50,7 @@ import com.martin.ruby.location.GpsReader
 import com.martin.ruby.location.LocationStatus
 import com.martin.ruby.log.SensingLog
 import com.martin.ruby.memory.MemoryStore
+import com.martin.ruby.memory.ProjectKnowledge
 import com.martin.ruby.motion.MotionSensor
 import com.martin.ruby.motion.MotionStatus
 import com.martin.ruby.sensing.BackgroundSensing
@@ -152,6 +153,11 @@ class MainActivity : ComponentActivity() {
         placeStore = PlaceStore(applicationContext)
         memoryStore = MemoryStore(applicationContext)
         backupManager = BackupManager(applicationContext)
+        // Her project knowledge: added to memory, or updated if this build has a new overview.
+        lifecycleScope.launch {
+            runCatching { ProjectKnowledge.sync(applicationContext) }
+                .onFailure { SensingLog.add("Project knowledge couldn't be updated: ${it.message}") }
+        }
         openBackupRequested = intent?.getBooleanExtra(EXTRA_OPEN_BACKUP, false) == true
         openStorageRequested = intent?.getBooleanExtra(EXTRA_OPEN_STORAGE, false) == true
         openRemindersRequested = intent?.getBooleanExtra(EXTRA_OPEN_REMINDERS, false) == true

@@ -145,7 +145,7 @@ object MemoryExport {
                 out.write("\n== $thisDay ==\n")
                 lastDay = thisDay
             }
-            val who = if (message.role == MemoryMessage.ROLE_RUBY) "Ruby" else "You"
+            val who = when (message.role) { MemoryMessage.ROLE_RUBY -> "Ruby"; MemoryMessage.ROLE_KNOWLEDGE -> "Project knowledge"; else -> "You" }
             val heading = listOfNotNull(time.format(whenDate), who, message.context).joinToString(" · ")
             // Later lines of a message are indented, so each message's start is easy to see.
             val text = message.text.replace("\r\n", "\n").replace("\n", "\n    ")

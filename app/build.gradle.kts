@@ -87,6 +87,17 @@ ksp {
 // Device tests read the saved schemas, to build an old version of the memory database and upgrade it.
 android.sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
 
+// Ruby's project knowledge: docs/Ruby_Project_Overview.md goes into the app as an asset
+// (knowledge/Ruby_Project_Overview.md), and she keeps it in memory (see ProjectKnowledge).
+// Replace the file and build again: she updates her notes, without duplicates.
+val knowledgeAssets = layout.buildDirectory.dir("generated/knowledgeAssets")
+val copyProjectKnowledge = tasks.register<Copy>("copyProjectKnowledge") {
+    from(rootProject.file("docs/Ruby_Project_Overview.md"))
+    into(knowledgeAssets.map { it.dir("knowledge") })
+}
+android.sourceSets.getByName("main").assets.srcDir(knowledgeAssets.get().asFile)
+tasks.named("preBuild") { dependsOn(copyProjectKnowledge) }
+
 dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

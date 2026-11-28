@@ -30,7 +30,7 @@ data class MemoryMessage(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     /** When it was written (wall-clock time). */
     val timeMillis: Long,
-    /** Who wrote it: [ROLE_USER] or [ROLE_RUBY]. */
+    /** Who wrote it: [ROLE_USER] or [ROLE_RUBY], or [ROLE_KNOWLEDGE] for a project knowledge note. */
     val role: String,
     val text: String,
     /** What the decision engine said you were doing at the time, e.g. "Driving". */
@@ -39,7 +39,11 @@ data class MemoryMessage(
     companion object {
         const val ROLE_USER = "user"
         const val ROLE_RUBY = "ruby"
+        /** A note of Ruby's project knowledge ([ProjectKnowledge]): kept as it is, never summarized or archived. */
+        const val ROLE_KNOWLEDGE = "knowledge"
     }
+
+    val isKnowledge: Boolean get() = role == ROLE_KNOWLEDGE
 }
 
 @Dao
@@ -89,6 +93,7 @@ interface MemoryDao {
         """
         SELECT * FROM messages
         WHERE id NOT IN (SELECT id FROM messages ORDER BY timeMillis DESC, id DESC LIMIT :keepNewest)
+        AND role != 'knowledge'
         AND NOT EXISTS (
             SELECT 1 FROM memory_archive a WHERE a.state = 'back'
             AND messages.id BETWEEN a.backFirstId AND a.backLastId AND a.heldUntilMillis > :now
@@ -98,6 +103,13 @@ interface MemoryDao {
         """
     )
     suspend fun packable(keepNewest: Int, now: Long, limit: Int): List<MemoryMessage>
+
+    /** The project knowledge notes ([ProjectKnowledge]), in order. */
+    @Query("SELECT * FROM messages WHERE role = 'knowledge' ORDER BY timeMillis, id")
+    suspend fun knowledge(): List<MemoryMessage>
+
+    @Query("DELETE FROM messages WHERE role = 'knowledge'")
+    suspend fun deleteKnowledge()
 
     /** Full-text search; build the query with [MemoryDatabase.searchQuery]. */
     @RawQuery(observedEntities = [MemoryMessage::class])

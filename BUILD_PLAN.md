@@ -89,6 +89,8 @@ Only change the state after it holds for 30 to 60 seconds, so a stoplight doesn'
 
 **Rule: one memory, whichever AI engine.** Ruby's memory is one persistent, growing entity no matter which AI engine is used. Memories made in Claude mode or Free mode go into the same database, the same backups, the same Drive archive and the same index. Switching engines never splits, hides, resets or loses memories; both engines read and write the same memory. Free mode may pull fewer memories per answer because of its smaller input limit, but nothing is ever left out of storage. (Checked Nov 24, 2026: every save, chat, briefing and summary, goes through the one memory store whichever engine answers, recall happens before the engine is chosen, and backups and the archive don't depend on the engine. `MemoryAcrossEnginesTest` checks that a memory saved in one mode is found in the other.)
 
+**Project knowledge (Nov 27, 2026, `project-knowledge` branch):** Martin's overview of the whole project (`docs/Ruby_Project_Overview.md`, written to Ruby) is bundled with the app and kept in her memory as notes, one per section, so chat recall and memory search find it ("who created you?", "what's on your to-do list?"). On each start (and after a restore) she compares the notes with the bundled file and replaces them if it changed, so a new build with a new overview never makes duplicates. The notes go into backups, are never summarized, and are never moved to the Drive archive. At most 2 go with a message.
+
 **Test:** chat for a few days, wipe the app, restore from backup, and ask about something from day one.
 
 Be upfront in the privacy policy: each message and its memory snippets still go to the AI provider to get an answer. The archive itself stays with the user.
