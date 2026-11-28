@@ -7,3 +7,9 @@
 # "IllegalAccessError: Class kotlin.text.h extended by class ym1 is inaccessible".
 # Keeping their names keeps the chain together in its package; they can still be shrunk and optimized.
 -keepnames,allowoptimization class kotlin.**.*Kt__*
+
+# Vosk (the wake word) reaches its native library through JNA, which finds classes and
+# fields by name, so neither may be renamed or removed.
+-keep class com.sun.jna.** { *; }
+-keep class org.vosk.** { *; }
+-dontwarn java.awt.**

@@ -1,5 +1,7 @@
 package com.martin.ruby.ui
 
+import androidx.compose.material3.FilterChip
+import com.martin.ruby.listening.ListeningPrefs
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -94,6 +96,7 @@ data class MainActions(
     val onOpenReminders: () -> Unit = {},
     val onOpenBriefing: () -> Unit = {},
     val onOpenRadio: () -> Unit = {},
+    val onOpenVoiceSettings: () -> Unit = {},
     val onTestGps: () -> Unit = {},
     val onClearLog: () -> Unit = {},
 )
@@ -108,6 +111,9 @@ data class RubyUi(
     val liveLevel: () -> Float = { -1f },
     val radio: Radio.State = Radio.State(),
     val radioActions: RadioActions = RadioActions(),
+    /** The listening modes, for the quick on/off. */
+    val listening: ListeningPrefs = ListeningPrefs(),
+    val onListeningOn: (Boolean) -> Unit = {},
 )
 
 /** The home screen: Ruby's orb and chat box first, then what she senses, then setup. */
@@ -121,7 +127,10 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
         verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        RubySection(ruby, onOpenChat = actions.onOpenChat, onOpenBriefing = actions.onOpenBriefing, onOpenRadio = actions.onOpenRadio)
+        RubySection(
+            ruby, onOpenChat = actions.onOpenChat, onOpenBriefing = actions.onOpenBriefing, onOpenRadio = actions.onOpenRadio,
+            onOpenVoiceSettings = actions.onOpenVoiceSettings,
+        )
         Spacer(Modifier.height(24.dp))
         HorizontalDivider()
         Spacer(Modifier.height(24.dp))
@@ -232,7 +241,13 @@ fun MainScreen(state: MainUiState, actions: MainActions, modifier: Modifier = Mo
  * In debug builds a long press on the orb shows each of its states in turn.
  */
 @Composable
-private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit, onOpenBriefing: () -> Unit, onOpenRadio: () -> Unit) {
+private fun RubySection(
+    ruby: RubyUi,
+    onOpenChat: () -> Unit,
+    onOpenBriefing: () -> Unit,
+    onOpenRadio: () -> Unit,
+    onOpenVoiceSettings: () -> Unit,
+) {
     val chat = ruby.chat
     val voice = ruby.voice
     var showVoice by rememberSaveable { mutableStateOf(false) }
@@ -247,6 +262,16 @@ private fun RubySection(ruby: RubyUi, onOpenChat: () -> Unit, onOpenBriefing: ()
         TextButton(onClick = { showAi = true }) { Text(if (chat.engine == AiEngine.FREE) "AI: Free mode" else "AI: Claude") }
         TextButton(onClick = onOpenBriefing) { Text("Briefing") }
         TextButton(onClick = { showVoice = true }) { Text("Voice and orb") }
+        TextButton(onClick = onOpenVoiceSettings, modifier = Modifier.testTag("open-voice-settings")) { Text("Voice settings") }
+        // The quick on/off for the listening modes (battery), once any is ticked.
+        if (ruby.listening.anyMode) {
+            FilterChip(
+                selected = ruby.listening.on,
+                onClick = { ruby.onListeningOn(!ruby.listening.on) },
+                label = { Text(if (ruby.listening.on) "Listening: on" else "Listening: off") },
+                modifier = Modifier.testTag("listening-chip"),
+            )
+        }
     }
     if (voice.prefs.showOrb) {
         AuroraOrb(

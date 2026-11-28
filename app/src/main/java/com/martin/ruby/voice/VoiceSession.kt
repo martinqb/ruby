@@ -120,12 +120,12 @@ object VoiceSession {
                 replyArrived = true
                 voice?.noteReplyArrived(now)
             }
-            chunker?.feed(soFar)?.forEach { voice?.say(it) }
+            chunker?.feed(soFar)?.forEach { say(it) }
         }
     }
 
     fun replyFinished() = onMain {
-        chunker?.finish()?.forEach { voice?.say(it) }
+        chunker?.finish()?.forEach { say(it) }
         chunker = null
         _ui.update { it.copy(readingReply = false) }
     }
@@ -134,7 +134,7 @@ object VoiceSession {
     fun replyFailed(message: String) = onMain {
         if (chunker != null) {
             voice?.stop()
-            voice?.say(if (message.startsWith("Sorry")) message else "Sorry. $message")
+            say(if (message.startsWith("Sorry")) message else "Sorry. $message")
         }
         chunker = null
         _ui.update { it.copy(readingReply = false) }
@@ -145,8 +145,23 @@ object VoiceSession {
         chunker = null
         voice?.stop()
         val c = SpeechChunker()
-        (c.feed(text) + c.finish()).forEach { voice?.say(it) }
+        (c.feed(text) + c.finish()).forEach { say(it) }
     }
+
+    /** What she has said lately (the last few sentences), so listening can tell her own echo from the user. */
+    private val said = StringBuilder()
+
+    private fun say(text: String) {
+        said.append(' ').append(text)
+        if (said.length > SAID_KEPT) said.delete(0, said.length - SAID_KEPT)
+        voice?.say(text)
+    }
+
+    /** Her last few sentences (see [said]). Main thread. */
+    fun recentlySaid(): String = said.toString()
+
+    /** Shows a short note under the Talk button, like after listening. */
+    fun showNote(text: String) = _ui.update { it.copy(note = text) }
 
     /**
      * Speaks [text] from anywhere, even with Ruby's screen closed (the morning briefing):
@@ -161,7 +176,7 @@ object VoiceSession {
         }
     }
 
-    /** When she was last stopped (Stop talking, the steering wheel...), elapsedRealtime. */
+    /** When she was last stopped (Stop talking, the car's controls, talking over her...), elapsedRealtime. */
     @Volatile var lastStoppedAt = 0L
         private set
 
@@ -185,8 +200,11 @@ object VoiceSession {
         }
     }
 
-    /** Listens once; [onHeard] gets what the user said. Needs the microphone permission. */
-    fun listen(onHeard: (String) -> Unit) {
+    /**
+     * Listens once; [onHeard] gets what the user said, or [onNothing] is called if nothing usable
+     * was heard. Needs the microphone permission.
+     */
+    fun listen(onNothing: () -> Unit = {}, onHeard: (String) -> Unit) {
         val e = ears ?: return
         stopSpeaking() // so she doesn't hear herself
         _ui.update { it.copy(listening = true, heard = "", note = null, listensOnDevice = e.onDevice) }
@@ -198,8 +216,10 @@ object VoiceSession {
                 onHeard(text)
             }
 
-            override fun onError(message: String) =
+            override fun onError(message: String) {
                 _ui.update { it.copy(listening = false, heard = "", note = message, listensOnDevice = e.onDevice) }
+                onNothing()
+            }
         })
     }
 
@@ -255,6 +275,7 @@ object VoiceSession {
         setOf(ContextState.Kind.DRIVING, ContextState.Kind.IN_VEHICLE)
 
     private const val DEFAULT_TALKING = "Ruby is talking"
+    private const val SAID_KEPT = 600
 
     private fun onMain(block: () -> Unit) {
         scope.launch { block() }

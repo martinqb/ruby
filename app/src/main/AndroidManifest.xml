@@ -43,6 +43,12 @@
 
     <!-- Voice: hearing the user when they tap Talk. Asked for the first time they do. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- The wake word with the screen off: open Ruby's view from the background ("Display over
+         other apps", asked once in Voice settings), or a full-screen notification without it. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Listening modes: hearing the wake word and conversation with Ruby in the background. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <!-- The morning briefing reads today's events. Asked only when the briefing is turned on. -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
@@ -69,6 +75,16 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Ruby">
+        <!-- Ruby's small view over the lock screen after the wake word (it never unlocks the phone). -->
+        <activity
+            android:name=".ui.WakeActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:taskAffinity="com.martin.ruby.wake"
+            android:theme="@style/Theme.Ruby"
+            android:turnScreenOn="true" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -102,6 +118,12 @@
                 <action android:name="androidx.media3.session.MediaSessionService" />
             </intent-filter>
         </service>
+
+        <!-- Listening modes in the background (wake word, conversation, talking over Ruby). -->
+        <service
+            android:name=".listening.ListeningService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <service
             android:name=".sensing.SensingService"

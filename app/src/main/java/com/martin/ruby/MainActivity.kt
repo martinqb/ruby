@@ -76,13 +76,19 @@ import com.martin.ruby.reminders.ReminderStore
 import com.martin.ruby.ui.ExportScreen
 import com.martin.ruby.ui.StorageScreen
 import com.martin.ruby.ui.theme.RubyTheme
+import com.martin.ruby.listening.Listening
+import com.martin.ruby.listening.ListeningSettings
+import com.martin.ruby.listening.WakeScreen
+import com.martin.ruby.listening.VoskModel
+import com.martin.ruby.ui.VoiceSettingsActions
+import com.martin.ruby.ui.VoiceSettingsScreen
 import com.martin.ruby.voice.KokoroModel
 import com.martin.ruby.voice.VoiceSession
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Which screen is showing. */
-private enum class Screen { MAIN, CHAT, REMINDERS, SUMMARIES, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT, BRIEFING, RADIO }
+private enum class Screen { MAIN, CHAT, REMINDERS, SUMMARIES, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT, BRIEFING, RADIO, VOICE_SETTINGS }
 
 class MainActivity : ComponentActivity() {
 
@@ -97,6 +103,7 @@ class MainActivity : ComponentActivity() {
     private var hasLocationPermission by mutableStateOf(false)
     private var hasBackgroundLocation by mutableStateOf(false)
     private var hasMicPermission by mutableStateOf(false)
+    private var canShowOverScreen by mutableStateOf(true)
     private var hasCalendarPermission by mutableStateOf(false)
     private var gpsEnabled by mutableStateOf(true)
     private var batteryOptimized by mutableStateOf(false)
@@ -117,6 +124,13 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             hasMicPermission = granted
             if (granted) listen()
+        }
+
+    /** Asked on the Voice settings page, for the listening modes (doesn't start listening by itself). */
+    private val modesMicLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            hasMicPermission = granted
+            if (granted) Listening.appShown(this)
         }
 
     /** Asked when the briefing (with today's calendar) is turned on. */
@@ -143,6 +157,7 @@ class MainActivity : ComponentActivity() {
         checkPermissions()
         ChatSession.checkKey(applicationContext)
         VoiceSession.start(applicationContext)
+        Listening.start(applicationContext)
 
         // Android's own backup can bring "nightly is on" to a new phone without the
         // scheduled job, so make sure it's scheduled. Scheduling again changes nothing.
@@ -176,6 +191,8 @@ class MainActivity : ComponentActivity() {
                 val briefing by remember { MorningBriefing.state(applicationContext) }.collectAsState(initial = BriefingState())
                 val briefingWorking by MorningBriefing.working.collectAsState()
                 val radio by Radio.state.collectAsState()
+                val listening by Listening.ui.collectAsState()
+                val overScreenAsked by remember { ListeningSettings(applicationContext).overlayAsked }.collectAsState(initial = true)
                 val radioAfterBriefing by remember { RadioSettings(applicationContext).startAfterBriefing }.collectAsState(initial = false)
                 val radioPresets by remember { PresetStore(applicationContext).presets }.collectAsState(initial = Presets())
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
@@ -272,6 +289,25 @@ class MainActivity : ComponentActivity() {
                             hasMicPermission = hasMicPermission,
                             context = context?.state?.label,
                             actions = chatActions.copy(onBack = { screen = Screen.MAIN }),
+                            modifier = modifier,
+                        )
+
+                        Screen.VOICE_SETTINGS -> VoiceSettingsScreen(
+                            state = listening,
+                            hasMic = hasMicPermission,
+                            actions = VoiceSettingsActions(
+                                onSave = { Listening.save(applicationContext, it) },
+                                onDownloadModel = { VoskModel.download(applicationContext) },
+                                onAllowMic = { modesMicLauncher.launch(Manifest.permission.RECORD_AUDIO) },
+                                unknownWords = { Listening.unknownWords(applicationContext, it) },
+                                onBack = { screen = Screen.MAIN },
+                                canShowOverScreen = canShowOverScreen,
+                                askOverScreen = !overScreenAsked,
+                                onOverScreenAnswer = { open ->
+                                    lifecycleScope.launch { ListeningSettings(applicationContext).setOverlayAsked() }
+                                    if (open) startActivity(WakeScreen.overlaySettings(this@MainActivity))
+                                },
+                            ),
                             modifier = modifier,
                         )
 
@@ -386,6 +422,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenReminders = { screen = Screen.REMINDERS },
                                 onOpenBriefing = { screen = Screen.BRIEFING },
                                 onOpenRadio = { screen = Screen.RADIO },
+                                onOpenVoiceSettings = { screen = Screen.VOICE_SETTINGS },
                                 onTestGps = { BackgroundSensing.testGps(this) },
                                 onClearLog = SensingLog::clear,
                             ),
@@ -398,12 +435,19 @@ class MainActivity : ComponentActivity() {
                                 liveLevel = VoiceSession::liveLevel,
                                 radio = radio,
                                 radioActions = radioActions,
+                                listening = listening.prefs,
+                                onListeningOn = { Listening.setOn(applicationContext, it) },
                             ),
                         )
                     }
                 }
             }
         }
+    }
+
+    override fun onPause() {
+        WakeScreen.mainShown = false
+        super.onPause()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -415,11 +459,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        WakeScreen.mainShown = true
+        canShowOverScreen = WakeScreen.canOpenFromBackground(this)
         // The user may have changed a permission or setting, or the car may have
         // connected while Ruby was closed, so check again whenever the screen comes back.
         checkPermissions()
         refreshCarState()
         startSensingIfEnabled()
+        // Background listening can only start while Ruby is on screen.
+        Listening.appShown(this)
         // Free mode: check Gemini Nano, and make any summaries that are due while Ruby is open.
         lifecycleScope.launch {
             FreeMode.refresh()
@@ -441,7 +489,7 @@ class MainActivity : ComponentActivity() {
 
     /** Listens once, and sends what the user said; the reply may then be read aloud. */
     private fun listen() {
-        VoiceSession.listen { heard -> ChatSession.send(applicationContext, heard, spoken = true) }
+        Listening.talk(applicationContext)
     }
 
     private fun onPermissionsChanged() {
