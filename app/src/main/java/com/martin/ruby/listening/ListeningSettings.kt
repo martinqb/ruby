@@ -20,6 +20,14 @@ class ListeningSettings(context: Context) {
         val WAKE_WORD = booleanPreferencesKey("listening_wake_word")
         val WAKE_PHRASE = stringPreferencesKey("listening_wake_phrase")
         val FULL_DUPLEX = booleanPreferencesKey("listening_full_duplex")
+        val OVERLAY_ASKED = booleanPreferencesKey("listening_overlay_asked")
+    }
+
+    /** Whether Ruby has asked once for "Display over other apps" (to show herself on the wake word). */
+    val overlayAsked: Flow<Boolean> = app.dataStore.data.map { it[Keys.OVERLAY_ASKED] ?: false }
+
+    suspend fun setOverlayAsked() {
+        app.dataStore.edit { it[Keys.OVERLAY_ASKED] = true }
     }
 
     val prefs: Flow<ListeningPrefs> = app.dataStore.data.map { p ->

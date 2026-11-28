@@ -13,6 +13,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
@@ -47,6 +48,12 @@ data class VoiceSettingsActions(
     /** The words of a wake phrase the listening model can't hear. */
     val unknownWords: suspend (String) -> List<String> = { emptyList() },
     val onBack: () -> Unit = {},
+    /** Ruby may open her view from the background ("Display over other apps"), for the wake word with the screen off. */
+    val canShowOverScreen: Boolean = true,
+    /** She hasn't asked for that yet: ask once, when the wake word is on. */
+    val askOverScreen: Boolean = false,
+    /** The answer to that one-time ask: true opens Android's settings page for it. */
+    val onOverScreenAnswer: (Boolean) -> Unit = {},
 )
 
 /** Voice settings: how Ruby listens. The three modes combine; the switch pauses them all. */
@@ -54,6 +61,7 @@ data class VoiceSettingsActions(
 fun VoiceSettingsScreen(state: Listening.Ui, hasMic: Boolean, actions: VoiceSettingsActions, modifier: Modifier = Modifier) {
     val prefs = state.prefs
     val small = MaterialTheme.typography.bodySmall
+    if (prefs.wakeWord && actions.askOverScreen && !actions.canShowOverScreen) OverScreenAsk(actions)
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         TextButton(onClick = actions.onBack) { Text("Back") }
@@ -173,6 +181,14 @@ private fun WakeWordMode(prefs: ListeningPrefs, enabled: Boolean, actions: Voice
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             problem?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            if (prefs.wakeWord && !actions.canShowOverScreen) {
+                Text(
+                    "With the screen off, Ruby shows herself through a notification. To have her turn the screen on " +
+                        "and show her orb, allow \"Display over other apps\".",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(onClick = { actions.onOverScreenAnswer(true) }, modifier = Modifier.testTag("allow-over-screen")) { Text("Allow") }
+            }
             if (problem == null && !changed && unknown.isNotEmpty()) {
                 Text(
                     "Ruby's listening model doesn't know " + unknown.joinToString(" or ") { "\"$it\"" } +
@@ -182,6 +198,24 @@ private fun WakeWordMode(prefs: ListeningPrefs, enabled: Boolean, actions: Voice
             }
         }
     }
+}
+
+/** The one-time ask for "Display over other apps", with why. */
+@Composable
+private fun OverScreenAsk(actions: VoiceSettingsActions) {
+    AlertDialog(
+        onDismissRequest = { actions.onOverScreenAnswer(false) },
+        title = { Text("Show Ruby when you call her") },
+        text = {
+            Text(
+                "When you say the wake word with the screen off, Ruby can turn the screen on and show her orb and your " +
+                    "conversation over the lock screen. Android calls this \"Display over other apps\". She never unlocks " +
+                    "your phone: to open her full screen, you unlock it yourself. Without it, she shows a notification instead.",
+            )
+        },
+        confirmButton = { TextButton(onClick = { actions.onOverScreenAnswer(true) }, modifier = Modifier.testTag("over-screen-open")) { Text("Open settings") } },
+        dismissButton = { TextButton(onClick = { actions.onOverScreenAnswer(false) }, modifier = Modifier.testTag("over-screen-not-now")) { Text("Not now") } },
+    )
 }
 
 @Composable

@@ -77,6 +77,8 @@ import com.martin.ruby.ui.ExportScreen
 import com.martin.ruby.ui.StorageScreen
 import com.martin.ruby.ui.theme.RubyTheme
 import com.martin.ruby.listening.Listening
+import com.martin.ruby.listening.ListeningSettings
+import com.martin.ruby.listening.WakeScreen
 import com.martin.ruby.listening.VoskModel
 import com.martin.ruby.ui.VoiceSettingsActions
 import com.martin.ruby.ui.VoiceSettingsScreen
@@ -101,6 +103,7 @@ class MainActivity : ComponentActivity() {
     private var hasLocationPermission by mutableStateOf(false)
     private var hasBackgroundLocation by mutableStateOf(false)
     private var hasMicPermission by mutableStateOf(false)
+    private var canShowOverScreen by mutableStateOf(true)
     private var hasCalendarPermission by mutableStateOf(false)
     private var gpsEnabled by mutableStateOf(true)
     private var batteryOptimized by mutableStateOf(false)
@@ -189,6 +192,7 @@ class MainActivity : ComponentActivity() {
                 val briefingWorking by MorningBriefing.working.collectAsState()
                 val radio by Radio.state.collectAsState()
                 val listening by Listening.ui.collectAsState()
+                val overScreenAsked by remember { ListeningSettings(applicationContext).overlayAsked }.collectAsState(initial = true)
                 val radioAfterBriefing by remember { RadioSettings(applicationContext).startAfterBriefing }.collectAsState(initial = false)
                 val radioPresets by remember { PresetStore(applicationContext).presets }.collectAsState(initial = Presets())
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
@@ -297,6 +301,12 @@ class MainActivity : ComponentActivity() {
                                 onAllowMic = { modesMicLauncher.launch(Manifest.permission.RECORD_AUDIO) },
                                 unknownWords = { Listening.unknownWords(applicationContext, it) },
                                 onBack = { screen = Screen.MAIN },
+                                canShowOverScreen = canShowOverScreen,
+                                askOverScreen = !overScreenAsked,
+                                onOverScreenAnswer = { open ->
+                                    lifecycleScope.launch { ListeningSettings(applicationContext).setOverlayAsked() }
+                                    if (open) startActivity(WakeScreen.overlaySettings(this@MainActivity))
+                                },
                             ),
                             modifier = modifier,
                         )
@@ -435,6 +445,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onPause() {
+        WakeScreen.mainShown = false
+        super.onPause()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_BACKUP, false)) openBackupRequested = true
@@ -444,6 +459,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        WakeScreen.mainShown = true
+        canShowOverScreen = WakeScreen.canOpenFromBackground(this)
         // The user may have changed a permission or setting, or the car may have
         // connected while Ruby was closed, so check again whenever the screen comes back.
         checkPermissions()

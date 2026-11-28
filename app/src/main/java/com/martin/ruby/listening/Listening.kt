@@ -207,6 +207,8 @@ object Listening {
             val a = app ?: return
             SensingLog.add("Listening: heard the wake word.")
             VoiceSession.stopSpeaking()
+            // Screen off or locked: turn it on and show her (never unlocking the phone).
+            WakeScreen.show(a)
             talk(a)
         }
 
