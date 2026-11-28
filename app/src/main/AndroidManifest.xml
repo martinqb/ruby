@@ -56,6 +56,8 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!-- iHeartRadio: to reach its player (play WEBN when its link doesn't start it). -->
+        <package android:name="com.clearchannel.iheartradio.controller" />
     </queries>
 
     <application

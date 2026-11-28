@@ -24,8 +24,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -287,6 +290,10 @@ object Radio {
     /** Opens [station] in the iHeartRadio app (the fallback). Returns what Ruby says. */
     fun openInIHeart(context: Context, station: Station): String {
         val app = context.applicationContext
+        if (iHeartStandIn) {
+            remember(app, station)
+            return "Opening ${station.name} in iHeartRadio."
+        }
         val links = listOfNotNull(
             station.iHeartId?.let { Uri.parse("ihr://play/live/$it") },
             station.iHeartId?.let { Uri.parse("https://www.iheart.com/live/$it/") },
@@ -320,8 +327,95 @@ object Radio {
         }
         record("opened ${station.name} in the iHeartRadio app")
         _state.value = State(inIHeart = station, inIHeartSince = SystemClock.elapsedRealtime())
+        val attempt = ++iHeartAttempt
+        stopsReportedFor = 0
         watchOtherApps(context)
+        scope.launch { checkIHeartStarted(context.applicationContext, station, attempt, checkTimes.first, checkTimes.second) }
     }
+
+    /** For tests (the emulator has no iHeartRadio): "opening" a station there only starts the check. */
+    internal var iHeartStandIn = false
+
+    /** How long the check waits for iHeartRadio to play by itself, then after pressing play (tests shorten them). */
+    internal var checkTimes = IHeartStartCheck.AUTOPLAY_MS to IHeartStartCheck.AFTER_PRESS_MS
+
+    /** What happened after opening a station in iHeartRadio, for whoever asked (the chat, the briefing). */
+    data class IHeartNews(val attempt: Int, val station: Station, val text: String, val failed: Boolean)
+
+    private val _iHeartNews = MutableSharedFlow<IHeartNews>(extraBufferCapacity = 8)
+    val iHeartNews: SharedFlow<IHeartNews> = _iHeartNews.asSharedFlow()
+
+    /** Counts openings in iHeartRadio, so a check that's been overtaken by a newer one says nothing. */
+    var iHeartAttempt = 0
+        private set
+
+    /** The opening whose later stop (iHeartRadio paused or closed) is worth telling about; 0 for none. */
+    private var stopsReportedFor = 0
+
+    /**
+     * After opening [station] in iHeartRadio: did it really start? Waits for it, presses play if
+     * it didn't, and tells [iHeartNews]. If it still isn't playing, the radio screen says so too.
+     * Main thread.
+     */
+    internal suspend fun checkIHeartStarted(
+        context: Context,
+        station: Station,
+        attempt: Int = iHeartAttempt,
+        autoplayMs: Long = IHeartStartCheck.AUTOPLAY_MS,
+        afterPressMs: Long = IHeartStartCheck.AFTER_PRESS_MS,
+    ): IHeartStart = withContext(Dispatchers.Main) {
+        val start = IHeartStartCheck.run(
+            playing = { otherAppPlaying(context) },
+            pressPlay = {
+                if (!iHeartStandIn && IHeartRemote.pressPlay(context)) {
+                    record("pressed play in iHeartRadio's player for ${station.name}")
+                } else {
+                    // A media key goes to whichever app played last: let go of Ruby's own radio
+                    // first, so it reaches iHeartRadio rather than her.
+                    releaseOwnSession(context)
+                    kotlinx.coroutines.delay(RELEASE_MS)
+                    record("pressed play (media key) for ${station.name} in iHeartRadio")
+                    pressMediaKey(context, KeyEvent.KEYCODE_MEDIA_PLAY)
+                }
+            },
+            waitFor = { ms, done -> waitFor(ms, done) },
+            autoplayMs = autoplayMs,
+            afterPressMs = afterPressMs,
+        )
+        // Something newer happened meanwhile (another station, Ruby's own radio): say nothing.
+        if (attempt != iHeartAttempt || _state.value.inIHeart?.id != station.id) return@withContext start
+        val text = RadioCommands.iHeartStartReply(station, start)
+        if (start == IHeartStart.NOT_PLAYING) {
+            record("${station.name} opened in iHeartRadio but didn't start playing")
+            // The radio screen shows why, with Open in iHeartRadio to try again.
+            _state.value = _state.value.copy(station = station, problem = text, iHeartPlaying = false)
+        } else {
+            record("${station.name} started playing in iHeartRadio")
+            stopsReportedFor = attempt
+            refreshOtherApps(context)
+        }
+        _iHeartNews.tryEmit(IHeartNews(attempt, station, text, failed = start == IHeartStart.NOT_PLAYING))
+        start
+    }
+
+    /**
+     * Ends Ruby's radio service (her radio is off by now), so its media session is gone and stops
+     * taking media keys meant for another app. The next "play" starts it again.
+     */
+    private fun releaseOwnSession(context: Context) {
+        if (_state.value.on) return
+        controller?.run {
+            removeListener(listener)
+            release()
+        }
+        controller = null
+        context.stopService(Intent(context, RadioService::class.java))
+    }
+
+    /** Another app (not Ruby's radio, not Ruby talking) is playing audio. */
+    private fun otherAppPlaying(context: Context): Boolean =
+        !_state.value.on && !VoiceSession.ui.value.speaking &&
+            context.getSystemService(AudioManager::class.java).isMusicActive
 
     private var watchingOtherApps = false
 
@@ -352,7 +446,16 @@ object Radio {
     fun refreshOtherApps(context: Context) {
         val s = _state.value
         val playing = s.inIHeart != null && !s.on && context.getSystemService(AudioManager::class.java).isMusicActive
-        if (playing != s.iHeartPlaying) _state.value = s.copy(iHeartPlaying = playing)
+        if (playing == s.iHeartPlaying) return
+        // Playing after all (pressed play there): the "didn't start" problem is over.
+        _state.value = if (playing) s.copy(iHeartPlaying = true, problem = null, station = null) else s.copy(iHeartPlaying = false)
+        val station = s.inIHeart
+        if (!playing && station != null && stopsReportedFor == iHeartAttempt && stopsReportedFor != 0) {
+            // It had started, and now it's stopped or iHeartRadio was closed: don't leave "is playing" up.
+            stopsReportedFor = 0
+            record("${station.name} stopped in iHeartRadio")
+            _iHeartNews.tryEmit(IHeartNews(iHeartAttempt, station, RadioCommands.iHeartStoppedReply(station), failed = false))
+        }
     }
 
     /** Presses a media key for whichever app is playing (Android sends it to the playing app's media session). */
@@ -386,6 +489,7 @@ object Radio {
     private var playGeneration = 0
 
     private const val OWN_STOP_MS = 2_000L
+    private const val RELEASE_MS = 800L
     private const val SETTLE_MS = 1_000L
     private const val OTHER_STOP_MS = 1_500L
     private const val RETRY_OFFER_MS = 2 * 60_000L

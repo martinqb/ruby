@@ -286,4 +286,40 @@ object RadioCommands {
 
     /** After the morning briefing in the car: start the radio if that's on and she wasn't stopped. */
     fun startAfterBriefing(enabled: Boolean, inCar: Boolean, stoppedByUser: Boolean) = enabled && inCar && !stoppedByUser
+
+    /** What Ruby says once she knows whether a station opened in iHeartRadio really started. */
+    fun iHeartStartReply(station: Station, start: IHeartStart): String = when (start) {
+        IHeartStart.PLAYING, IHeartStart.PLAYING_AFTER_PRESS -> "${station.name} is playing in iHeartRadio."
+        IHeartStart.NOT_PLAYING ->
+            "${station.name} opened in iHeartRadio, but it didn't start playing, even after I pressed play. Press play there, or ask me again."
+    }
+
+    /** What her "is playing in iHeartRadio" becomes once it stops or iHeartRadio is closed. */
+    fun iHeartStoppedReply(station: Station): String = "${station.name} stopped in iHeartRadio."
+}
+
+/** Whether a station opened in iHeartRadio really started: by itself, after Ruby pressed play, or not at all. */
+enum class IHeartStart { PLAYING, PLAYING_AFTER_PRESS, NOT_PLAYING }
+
+/**
+ * iHeartRadio's station link doesn't always start playing (it opens the station's page and
+ * leaves it there). So: wait up to [autoplayMs] for it to play by itself; if it doesn't, press
+ * play once ([pressPlay], through Android's media controls) and wait up to [afterPressMs] more.
+ * [waitFor] checks a condition until it holds or the time runs out (tests pass one that doesn't sleep).
+ */
+object IHeartStartCheck {
+    suspend fun run(
+        playing: () -> Boolean,
+        pressPlay: suspend () -> Unit,
+        waitFor: suspend (Long, () -> Boolean) -> Boolean,
+        autoplayMs: Long = AUTOPLAY_MS,
+        afterPressMs: Long = AFTER_PRESS_MS,
+    ): IHeartStart {
+        if (waitFor(autoplayMs, playing)) return IHeartStart.PLAYING
+        pressPlay()
+        return if (waitFor(afterPressMs, playing)) IHeartStart.PLAYING_AFTER_PRESS else IHeartStart.NOT_PLAYING
+    }
+
+    const val AUTOPLAY_MS = 6_000L
+    const val AFTER_PRESS_MS = 5_000L
 }
