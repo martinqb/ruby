@@ -49,12 +49,17 @@ internal fun AiEngineDialogContent(chat: ChatUi, status: FreeMode.Status, action
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 for (engine in AiEngine.entries) {
-                    val enabled = engine == AiEngine.CLAUDE || freePossible
+                    val enabled = engine != AiEngine.FREE || freePossible
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .selectable(selected = chat.engine == engine, enabled = enabled, role = Role.RadioButton) {
                                 actions.onChooseEngine(engine)
+                                // These are set up on the Models screen.
+                                if (engine.usesModelsScreen) {
+                                    onClose()
+                                    actions.onOpenModels()
+                                }
                             }
                             .testTag("engine-${engine.name}")
                             .padding(vertical = 4.dp),
@@ -69,6 +74,9 @@ internal fun AiEngineDialogContent(chat: ChatUi, status: FreeMode.Status, action
                                 Text("Needs your Anthropic API key: add it on the chat screen.", style = small, color = MaterialTheme.colorScheme.error)
                             }
                             if (engine == AiEngine.FREE) FreeModeStatus(status, actions)
+                            if (engine.usesModelsScreen && chat.engine == engine) {
+                                Text("Now: ${chat.engineLabel}", style = small, color = MaterialTheme.colorScheme.primary)
+                            }
                         }
                     }
                 }
@@ -92,6 +100,9 @@ internal fun AiEngineDialogContent(chat: ChatUi, status: FreeMode.Status, action
             }
         },
         confirmButton = { TextButton(onClick = onClose) { Text("Done") } },
+        dismissButton = {
+            TextButton(onClick = { onClose(); actions.onOpenModels() }, modifier = Modifier.testTag("open-models")) { Text("Models…") }
+        },
     )
 }
 

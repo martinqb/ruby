@@ -116,39 +116,43 @@ class ReminderTools(context: Context) : ToolBox {
          * The tool definitions: fixed text, built once, identical in every request. Never put
          * anything that can change (places, the time, the user's state) in here.
          */
-        val DEFINITIONS: List<BetaTool> by lazy {
-            listOf(
-                tool(
-                    SET,
-                    "Set a reminder for the user. Give either `at` (a time) or `place` (arriving at a saved " +
-                        "place), not both. Ruby shows it as a notification then.",
-                    mapOf(
-                        "text" to mapOf(
-                            "type" to "string",
-                            "description" to "What to remind them of, short and in their words, e.g. \"Call Mom\".",
-                        ),
-                        "at" to mapOf(
-                            "type" to "string",
-                            "description" to "Local date and time in the phone's time zone, as YYYY-MM-DDTHH:MM, e.g. " +
-                                "2026-11-24T17:00. Work it out from the current time in the user's message.",
-                        ),
-                        "place" to mapOf(
-                            "type" to "string",
-                            "description" to "The name of one of the user's saved places, as listed in the " +
-                                "\"Saved places\" note on their newest message. Fires the next time they arrive there.",
-                        ),
+        val DEFINITIONS: List<BetaTool> by lazy { SPECS.map { tool(it.name, it.description, it.properties, it.required) } }
+
+        /**
+         * The same tools as plain data, for other AI models (OpenAI-style function tools), so
+         * Claude's and theirs never drift apart.
+         */
+        val SPECS: List<ToolSpec> = listOf(
+            ToolSpec(
+                SET,
+                "Set a reminder for the user. Give either `at` (a time) or `place` (arriving at a saved " +
+                    "place), not both. Ruby shows it as a notification then.",
+                mapOf(
+                    "text" to mapOf(
+                        "type" to "string",
+                        "description" to "What to remind them of, short and in their words, e.g. \"Call Mom\".",
                     ),
-                    required = listOf("text"),
+                    "at" to mapOf(
+                        "type" to "string",
+                        "description" to "Local date and time in the phone's time zone, as YYYY-MM-DDTHH:MM, e.g. " +
+                            "2026-11-24T17:00. Work it out from the current time in the user's message.",
+                    ),
+                    "place" to mapOf(
+                        "type" to "string",
+                        "description" to "The name of one of the user's saved places, as listed in the " +
+                            "\"Saved places\" note on their newest message. Fires the next time they arrive there.",
+                    ),
                 ),
-                tool(LIST, "List the reminders that haven't gone off yet, with their ids.", emptyMap(), required = emptyList()),
-                tool(
-                    CANCEL,
-                    "Cancel a reminder by id (from list_reminders), for example when the user no longer needs it.",
-                    mapOf("id" to mapOf("type" to "integer", "description" to "The reminder's id.")),
-                    required = listOf("id"),
-                ),
-            )
-        }
+                required = listOf("text"),
+            ),
+            ToolSpec(LIST, "List the reminders that haven't gone off yet, with their ids.", emptyMap(), required = emptyList()),
+            ToolSpec(
+                CANCEL,
+                "Cancel a reminder by id (from list_reminders), for example when the user no longer needs it.",
+                mapOf("id" to mapOf("type" to "integer", "description" to "The reminder's id.")),
+                required = listOf("id"),
+            ),
+        )
 
         private fun tool(name: String, description: String, properties: Map<String, Any>, required: List<String>): BetaTool =
             BetaTool.builder()
@@ -169,3 +173,6 @@ class ReminderTools(context: Context) : ToolBox {
                 .build()
     }
 }
+
+/** A tool as plain data: its name, description, JSON-schema properties and required fields. */
+data class ToolSpec(val name: String, val description: String, val properties: Map<String, Any>, val required: List<String>)

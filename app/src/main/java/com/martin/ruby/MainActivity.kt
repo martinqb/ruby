@@ -78,6 +78,8 @@ import com.martin.ruby.ui.ExportScreen
 import com.martin.ruby.ui.StorageScreen
 import com.martin.ruby.ui.theme.RubyTheme
 import com.martin.ruby.listening.Listening
+import com.martin.ruby.ai.models.LocalServer
+import com.martin.ruby.ui.ModelsRoute
 import com.martin.ruby.listening.ListeningSettings
 import com.martin.ruby.listening.WakeScreen
 import com.martin.ruby.listening.VoskModel
@@ -89,7 +91,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Which screen is showing. */
-private enum class Screen { MAIN, CHAT, REMINDERS, SUMMARIES, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT, BRIEFING, RADIO, VOICE_SETTINGS }
+private enum class Screen { MAIN, CHAT, REMINDERS, SUMMARIES, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT, BRIEFING, RADIO, VOICE_SETTINGS, MODELS }
 
 class MainActivity : ComponentActivity() {
 
@@ -262,8 +264,11 @@ class MainActivity : ComponentActivity() {
                                 AiSettings(applicationContext).save(engine)
                                 SensingLog.add("AI engine: ${engine.label}.")
                                 if (engine == AiEngine.FREE) FreeMode.refresh()
+                                // An on-phone model holds GBs of memory: let it go when another engine answers.
+                                if (engine != AiEngine.LOCAL) LocalServer.stopSoon()
                             }
                         },
+                        onOpenModels = { screen = Screen.MODELS },
                         onCheckFreeMode = { lifecycleScope.launch { FreeMode.refresh() } },
                         onDownloadFree = { lifecycleScope.launch { FreeMode.download() } },
                         onUseClaude = { ChatSession.useClaudeForOffer(applicationContext) },
@@ -299,6 +304,8 @@ class MainActivity : ComponentActivity() {
                             actions = chatActions.copy(onBack = { screen = Screen.MAIN }),
                             modifier = modifier,
                         )
+
+                        Screen.MODELS -> ModelsRoute(onBack = { screen = Screen.MAIN }, modifier = modifier)
 
                         Screen.VOICE_SETTINGS -> VoiceSettingsScreen(
                             state = listening,

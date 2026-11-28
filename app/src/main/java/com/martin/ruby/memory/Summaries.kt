@@ -278,6 +278,10 @@ class SummaryWorker(context: Context, params: WorkerParameters) : CoroutineWorke
             } catch (e: Exception) {
                 SummarySettings(applicationContext).recordRun("Free mode: waiting until Ruby is open (${e.message})")
             }
+        } else if (AiSettings(applicationContext).current().usesModelsScreen) {
+            // Like Free mode, these never hand Ruby's memories to Claude by themselves. Summaries
+            // wait until Claude or Free mode is chosen again (not built for these models yet).
+            SummarySettings(applicationContext).recordRun("Waiting: summaries aren't made with on-phone or cloud/PC models yet")
         } else {
             Summaries.runWithClaude(applicationContext, ageDays)
         }

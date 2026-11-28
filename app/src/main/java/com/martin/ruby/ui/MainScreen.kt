@@ -259,7 +259,7 @@ private fun RubySection(
         if (voice.speaking) TextButton(onClick = ruby.chatActions.onStopSpeaking) { Text("Stop talking") }
         if (ruby.radio.on) TextButton(onClick = ruby.radioActions.onStop) { Text("Stop radio") }
         TextButton(onClick = onOpenRadio) { Text("Radio") }
-        TextButton(onClick = { showAi = true }) { Text(if (chat.engine == AiEngine.FREE) "AI: Free mode" else "AI: Claude") }
+        TextButton(onClick = { showAi = true }) { Text("AI: " + chat.engineLabel, modifier = Modifier.testTag("engine-label")) }
         TextButton(onClick = onOpenBriefing) { Text("Briefing") }
         TextButton(onClick = { showVoice = true }) { Text("Voice and orb") }
         TextButton(onClick = onOpenVoiceSettings, modifier = Modifier.testTag("open-voice-settings")) { Text("Voice settings") }

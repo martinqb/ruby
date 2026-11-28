@@ -94,6 +94,8 @@ data class ChatActions(
     /** "Use Claude for this one": a reminder Free mode couldn't do. */
     val onUseClaude: () -> Unit = {},
     val onDeclineOffer: () -> Unit = {},
+    /** Opens the Models screen (on-phone and cloud/PC models). */
+    val onOpenModels: () -> Unit = {},
 )
 
 /** Chatting with Claude, as Ruby, by typing or talking. Asks for an API key first if there isn't one. */
@@ -135,7 +137,7 @@ fun ChatScreen(
             }
         }
         Text(
-            "Chat with Ruby" + if (ui.engine == AiEngine.FREE) " · Free mode" else "",
+            "Chat with Ruby" + if (ui.engine != AiEngine.CLAUDE) " · " + ui.engineLabel else "",
             style = MaterialTheme.typography.headlineSmall,
         )
 

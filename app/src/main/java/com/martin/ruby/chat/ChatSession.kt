@@ -8,6 +8,8 @@ import com.martin.ruby.ai.FreeChatText
 import com.martin.ruby.ai.FreeMode
 import com.martin.ruby.ai.FreeReminderRunner
 import com.martin.ruby.ai.FreeReminders
+import com.martin.ruby.ai.models.ModelEngine
+import com.martin.ruby.ai.models.ModelStore
 import com.martin.ruby.decision.ContextStatus
 import com.martin.ruby.log.SensingLog
 import com.martin.ruby.memory.MemoryMessage
@@ -48,6 +50,8 @@ data class ChatUi(
     val hasKey: Boolean? = null,
     /** Who's answering: Claude, or Free mode (Gemini Nano on the phone). */
     val engine: AiEngine = AiEngine.CLAUDE,
+    /** The model behind an On-phone or Cloud/PC engine, e.g. "Qwen 3.5 9B (on phone)"; null for Claude and Free mode. */
+    val modelLabel: String? = null,
     /**
      * Free mode couldn't do this reminder request and Ruby asked "Want me to use Claude for
      * this one?". Answered with [ChatSession.useClaudeForOffer] or [ChatSession.declineOffer].
@@ -55,7 +59,10 @@ data class ChatUi(
     val claudeOffer: String? = null,
 ) {
     /** Whether the chat can be used: Free mode needs no key. */
-    val canChat: Boolean get() = hasKey == true || engine == AiEngine.FREE
+    val canChat: Boolean get() = hasKey == true || engine != AiEngine.CLAUDE
+
+    /** The active engine and model, for the screen: "Claude", "Free mode", "Qwen 3.5 9B (on phone)". */
+    val engineLabel: String get() = modelLabel ?: engine.label
 }
 
 /**
@@ -93,7 +100,10 @@ object ChatSession {
         }
         if (!watchingEngine) {
             watchingEngine = true
-            scope.launch { AiSettings(app).engine.collect { e -> _ui.update { it.copy(engine = e) } } }
+            scope.launch {
+                kotlinx.coroutines.flow.combine(AiSettings(app).engine, ModelStore(app).choices) { e, m -> e to ModelEngine.label(e, m) }
+                    .collect { (e, label) -> _ui.update { it.copy(engine = e, modelLabel = label) } }
+            }
         }
     }
 
@@ -238,8 +248,11 @@ object ChatSession {
             _ui.update { it.copy(turns = it.turns.dropLast(1) + turn) }
             VoiceSession.replyStarted(speak)
             try {
-                if (AiSettings(appContext).current() == AiEngine.FREE) {
+                val engine = AiSettings(appContext).current()
+                if (engine == AiEngine.FREE) {
                     replyFree(appContext, memory, message, turn)
+                } else if (engine.usesModelsScreen) {
+                    replyWithModel(appContext, memory, engine)
                 } else {
                     replyWithClaude(appContext, memory, _ui.value.turns, note = null)
                 }
@@ -282,6 +295,27 @@ object ChatSession {
             val actions = listOfNotNull(note) + reply.actions
             state.copy(turns = earlier + ChatTurn(fromUser = false, text = reply.text, actions = actions, transcript = reply.transcript))
         }
+        saveToMemory(memory, MemoryMessage.ROLE_RUBY, reply.text)
+    }
+
+    /**
+     * An On-phone or Cloud/PC model answers, with Ruby's same instructions, memory notes and (if the
+     * model can call them) reminder tools; the phone enforces the safety rules ([ModelSafety]).
+     * Never handed to Claude automatically.
+     */
+    private suspend fun replyWithModel(appContext: Context, memory: MemoryStore, engine: AiEngine) {
+        val ready = ModelEngine.connect(appContext, engine)
+        val toolBox = if (ready.toolsOn) tools ?: ReminderTools(appContext).also { tools = it } else null
+        val history = _ui.value.turns.takeLast(MAX_TURNS_SENT).dropWhile { !it.fromUser }
+        val reply = ready.chat.reply(ModelEngine.system(ready.toolsOn), history, toolBox) { soFar ->
+            _ui.update { it.copy(replying = soFar) }
+            VoiceSession.replyProgress(soFar)
+        }
+        if (engine == AiEngine.LOCAL) com.martin.ruby.ai.models.LocalServer.touch()
+        VoiceSession.replyFinished()
+        val notes = listOf("Answered by ${ready.label}") +
+            (if (ready.toolsOn) emptyList() else listOf(ModelEngine.actionsOffNote(ready.label))) + reply.actions
+        _ui.update { it.copy(turns = it.turns + ChatTurn(fromUser = false, text = reply.text, actions = notes)) }
         saveToMemory(memory, MemoryMessage.ROLE_RUBY, reply.text)
     }
 

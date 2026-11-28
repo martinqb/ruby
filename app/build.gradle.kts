@@ -55,12 +55,16 @@ android {
 
     buildTypes {
         debug {
+            // Martin's own Ruby: things only for him (like the uncensored on-phone model) are listed.
+            buildConfigField("boolean", "PERSONAL_BUILD", "true")
             // The emulator on this PC, where the device tests run.
             ndk {
                 abiFilters += listOf("x86_64")
             }
         }
         release {
+            // A public build: personal-only things are hidden or off.
+            buildConfigField("boolean", "PERSONAL_BUILD", "false")
             optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
@@ -71,6 +75,12 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+    packaging {
+        jniLibs {
+            // Installed as real files, so the on-phone model server (llama.cpp) can be started.
+            useLegacyPackaging = true
+        }
     }
     buildFeatures {
         compose = true
@@ -145,3 +155,41 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
+
+
+// On-phone models: llama.cpp's own Android build (its llama-server and libraries), which runs
+// GGUF models on the phone. Android only runs programs shipped inside the app, so they go in as
+// native libraries (the server renamed to libllama_server_exe.so). The archive is downloaded once
+// into third_party/ (not kept in git) and checked against its SHA-256.
+val llamaBuild = "b12823"
+val llamaSha256 = "e1ed84e9d57a27a4d6bb55a784eadc1d4873e2b3a07b2e97ea6c0fa8735c4b88"
+val llamaArchive: File = rootProject.file("third_party/llama-$llamaBuild-bin-android-arm64.tar.gz").also { tar ->
+    fun sha256(file: File): String = MessageDigest.getInstance("SHA-256")
+        .digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+    if (!tar.exists() || sha256(tar) != llamaSha256) {
+        tar.parentFile.mkdirs()
+        val part = File(tar.path + ".part")
+        URI("https://github.com/ggml-org/llama.cpp/releases/download/$llamaBuild/${tar.name}")
+            .toURL().openStream().use { input -> part.outputStream().use { input.copyTo(it) } }
+        val got = sha256(part)
+        check(got == llamaSha256) {
+            part.delete()
+            "llama.cpp $llamaBuild: downloaded file's SHA-256 is $got, expected $llamaSha256"
+        }
+        check(part.renameTo(tar)) { "Couldn't move ${part.name} into place" }
+    }
+}
+val llamaJniLibs = layout.buildDirectory.dir("generated/llamaJniLibs").get().asFile
+val unpackLlama = tasks.register<Copy>("unpackLlama") {
+    from(tarTree(resources.gzip(llamaArchive))) {
+        include(
+            "*/llama-server", "*/libllama-server-impl.so", "*/libllama.so", "*/libllama-common.so",
+            "*/libggml.so", "*/libggml-base.so", "*/libmtmd.so", "*/libggml-cpu-android_*.so",
+        )
+        eachFile { path = "arm64-v8a/" + (if (name == "llama-server") "libllama_server_exe.so" else name) }
+        includeEmptyDirs = false
+    }
+    into(llamaJniLibs)
+}
+android.sourceSets.getByName("main").jniLibs.srcDir(llamaJniLibs)
+tasks.named("preBuild") { dependsOn(unpackLlama) }

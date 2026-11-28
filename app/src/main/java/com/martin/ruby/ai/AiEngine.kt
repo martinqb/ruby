@@ -16,7 +16,12 @@ import kotlinx.coroutines.flow.map
 enum class AiEngine(val label: String, val explained: String) {
     CLAUDE("Claude", "Anthropic's Claude, with your own API key. Ruby at her smartest; each message costs a little."),
     FREE("Free mode", "Gemini Nano, the AI built into this phone. Nothing you say leaves the phone to be answered."),
+    LOCAL("On-phone model", "A model you download (several GB) and run on the phone with llama.cpp: offline, no key."),
+    REMOTE("Cloud or PC model", "Any OpenAI-compatible service: OpenRouter, or Ollama or LM Studio on your PC."),
     ;
+
+    /** One of the engines picked on the Models screen (not Claude, not Free mode). */
+    val usesModelsScreen: Boolean get() = this == LOCAL || this == REMOTE
 
     companion object {
         /** Under the switch, when this phone has Free mode. */

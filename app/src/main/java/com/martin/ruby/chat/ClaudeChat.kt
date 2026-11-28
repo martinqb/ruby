@@ -304,8 +304,8 @@ class ClaudeChat(apiKey: String, baseUrl: String? = null) {
         /** How many times one reply may call tools before Claude must answer. */
         private const val MAX_TOOL_ROUNDS = 5
 
-        /** Kept the same on every request, so it never changes what's sent unexpectedly. */
-        private const val SYSTEM_PROMPT =
+        /** Kept the same on every request, so it never changes what's sent unexpectedly. Other models get it too. */
+        const val SYSTEM_PROMPT =
             "You are Ruby, a personal assistant that lives on the user's Android phone. " +
                 "The phone senses what the user is doing (for example driving, walking, still, or at a " +
                 "saved place like home or the gym) and adds it, with the current time, to each of their " +
