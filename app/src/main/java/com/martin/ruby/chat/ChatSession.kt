@@ -145,6 +145,11 @@ object ChatSession {
      */
     private suspend fun onIHeartNews(appContext: Context, news: Radio.IHeartNews) {
         val pending = iHeartReply?.takeIf { it.attempt == news.attempt } ?: return
+        // Ruby has since played something else: what happened to the old station isn't the news.
+        if (!news.failed && !Radio.iHeartStillCurrent(news.attempt, news.station)) {
+            iHeartReply = null
+            return
+        }
         val updated = ChatTurn(fromUser = false, text = news.text)
         val latest = _ui.value.turns.lastOrNull() === pending.turn
         when {

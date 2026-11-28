@@ -440,11 +440,52 @@ class RadioDeviceTest {
             assertEquals(null, Radio.state.value.problem)
             assertTrue(waitUntil(3_000) { Radio.state.value.buttonLabel(Stations.WEBN) == "Open" })
             other.release() // iHeartRadio closed
-            assertTrue("And stopped once it closes", waitUntil(5_000) {
+            assertTrue("And stopped once it closes", waitUntil(Radio.STOP_CONFIRM_MS + 5_000) {
                 ChatSession.ui.value.turns.last().text == "WEBN 102.7 stopped in iHeartRadio."
             })
             assertEquals(2, ChatSession.ui.value.turns.size)
             assertEquals("Play", Radio.state.value.buttonLabel(Stations.WEBN))
+        } finally {
+            other.release()
+            endStandIn()
+        }
+    }
+
+    @Test
+    fun fromWebn_toWgrr_theLineShowsWgrr_notThatWebnStopped() {
+        emulatorOnly()
+        withMartinsPresets()
+        val other = otherAppPlaying() // WEBN playing in iHeartRadio
+        try {
+            assertTrue(waitUntil(3_000) { Radio.anythingPlaying(context) })
+            playWebnInChat()
+            assertTrue(waitUntil(6_000) { ChatSession.ui.value.turns.last().text == "WEBN 102.7 is playing in iHeartRadio." })
+            // "Play the radio" without stopping first: WGRR (the default) in Ruby, and iHeartRadio goes quiet.
+            instrumentation.runOnMainSync { ChatSession.send(context, "play the radio") }
+            assertTrue(waitUntil(5_000) { !ChatSession.ui.value.sending })
+            other.release()
+            Thread.sleep(Radio.STOP_CONFIRM_MS + 2_000)
+            val ruby = ChatSession.ui.value.turns.filter { !it.fromUser }.map { it.text }
+            assertEquals("Playing WGRR 103.5.", ruby.last())
+            assertTrue("never said WEBN stopped: $ruby", ruby.none { it.contains("stopped in iHeartRadio") })
+            assertEquals(Stations.WGRR, Radio.state.value.station)
+        } finally {
+            other.release()
+            endStandIn()
+        }
+    }
+
+    @Test
+    fun fromWebn_toWebnAgain_theOldOpeningsStopSaysNothing() {
+        emulatorOnly()
+        val other = otherAppPlaying()
+        try {
+            assertTrue(waitUntil(3_000) { Radio.anythingPlaying(context) })
+            playWebnInChat()
+            assertTrue(waitUntil(6_000) { ChatSession.ui.value.turns.last().text == "WEBN 102.7 is playing in iHeartRadio." })
+            instrumentation.runOnMainSync { ChatSession.send(context, "play WEBN") }
+            assertTrue(waitUntil(6_000) { ChatSession.ui.value.turns.last().text == "WEBN 102.7 is playing in iHeartRadio." })
+            assertEquals(4, ChatSession.ui.value.turns.size)
         } finally {
             other.release()
             endStandIn()

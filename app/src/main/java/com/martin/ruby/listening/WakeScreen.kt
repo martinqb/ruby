@@ -29,14 +29,27 @@ object WakeScreen {
         ALREADY_SHOWN,
         /** "Display over other apps" is allowed: open her small view directly. */
         OPEN_VIEW,
-        /** Otherwise: a full-screen notification opens it (or shows as a notification). */
-        NOTIFICATION,
+        /** "Full screen notifications" is allowed: the notification opens her view on the lock screen. */
+        FULL_SCREEN_NOTIFICATION,
+        /** Neither: she wakes the screen herself and shows her notification on the lock screen. */
+        WAKE_AND_NOTIFY,
     }
 
-    fun route(rubyShown: Boolean, canOpenFromBackground: Boolean): Route = when {
+    fun route(rubyShown: Boolean, canOpenFromBackground: Boolean, canFullScreen: Boolean = false): Route = when {
         rubyShown -> Route.ALREADY_SHOWN
         canOpenFromBackground -> Route.OPEN_VIEW
-        else -> Route.NOTIFICATION
+        canFullScreen -> Route.FULL_SCREEN_NOTIFICATION
+        else -> Route.WAKE_AND_NOTIFY
+    }
+
+    /** Which access to ask for in Voice settings (once each), or null: "Display over other apps" first, then "Full screen notifications". */
+    enum class Ask { OVERLAY, FULL_SCREEN }
+
+    fun ask(canOverlay: Boolean, overlayAsked: Boolean, canFullScreen: Boolean, fullScreenAsked: Boolean): Ask? = when {
+        canOverlay -> null
+        !overlayAsked -> Ask.OVERLAY
+        !canFullScreen && !fullScreenAsked -> Ask.FULL_SCREEN
+        else -> null
     }
 
     /** Ruby's full screen is in front (MainActivity resumed). Main thread. */
@@ -47,6 +60,25 @@ object WakeScreen {
 
     fun canOpenFromBackground(context: Context) = Settings.canDrawOverlays(context)
 
+    /**
+     * Whether Ruby's wake notification can open her view full screen: on Android 14 and later
+     * that's the "Full screen notifications" special access (often off for apps that aren't
+     * phones or alarms), and the "Wake word" notifications mustn't be turned down.
+     */
+    fun canUseFullScreen(context: Context): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= 34 && !manager.canUseFullScreenIntent()) return false
+        if (!manager.areNotificationsEnabled()) return false
+        val channel = manager.getNotificationChannel(CHANNEL_ID)
+        return channel == null || channel.importance >= NotificationManager.IMPORTANCE_HIGH
+    }
+
+    /** The settings page for "Full screen notifications" (Android 14 and later), else Ruby's notification settings. */
+    fun fullScreenSettings(context: Context): Intent =
+        (if (Build.VERSION.SDK_INT >= 34) Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:${context.packageName}"))
+        else Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
     /** The settings page where the user allows "Display over other apps" for Ruby. */
     fun overlaySettings(context: Context): Intent =
         Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
@@ -55,7 +87,7 @@ object WakeScreen {
     /** The wake word was heard: turn the screen on and show Ruby. */
     fun show(context: Context) {
         val app = context.applicationContext
-        val route = route(mainShown || viewShown, canOpenFromBackground(app))
+        val route = route(mainShown || viewShown, canOpenFromBackground(app), canUseFullScreen(app))
         SensingLog.add("Listening: showing Ruby (${route.name.lowercase().replace('_', ' ')}).")
         when (route) {
             Route.ALREADY_SHOWN -> Unit
@@ -64,8 +96,17 @@ object WakeScreen {
             } catch (e: Exception) {
                 SensingLog.add("Listening: couldn't open Ruby's view (${e.javaClass.simpleName}); using a notification.")
                 notify(app)
+                ScreenWake.whileTalking(app)
             }
-            Route.NOTIFICATION -> notify(app)
+            Route.FULL_SCREEN_NOTIFICATION -> {
+                notify(app)
+                // If Android still didn't open her view (the screen stayed dark), wake it anyway.
+                ScreenWake.ifStillDark(app)
+            }
+            Route.WAKE_AND_NOTIFY -> {
+                notify(app)
+                ScreenWake.whileTalking(app)
+            }
         }
     }
 
@@ -82,7 +123,10 @@ object WakeScreen {
             }
         )
         if (Build.VERSION.SDK_INT >= 34 && !manager.canUseFullScreenIntent()) {
-            SensingLog.add("Listening: full-screen notifications aren't allowed for Ruby; showing an ordinary one.")
+            SensingLog.add("Listening: \"Full screen notifications\" is off for Ruby; showing an ordinary notification.")
+        }
+        manager.getNotificationChannel(CHANNEL_ID)?.takeIf { it.importance < NotificationManager.IMPORTANCE_HIGH }?.let {
+            SensingLog.add("Listening: the \"Wake word\" notifications are turned down (importance ${it.importance}), so they can't open Ruby.")
         }
         val open = PendingIntent.getActivity(context, 2, viewIntent(context), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
@@ -91,6 +135,7 @@ object WakeScreen {
             .setContentText("Tap to see her.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setFullScreenIntent(open, true)
             .setContentIntent(open)
             .setAutoCancel(true)
@@ -117,7 +162,7 @@ object WakeScreen {
     fun keepScreenOn(active: Boolean, idleForMs: Long): Boolean = active || idleForMs < GRACE_MS
 
     const val GRACE_MS = 5_000L
-    private const val CHANNEL_ID = "wake"
-    private const val NOTIFICATION_ID = 8
+    internal const val CHANNEL_ID = "wake"
+    internal const val NOTIFICATION_ID = 8
     private const val NOTIFICATION_TIMEOUT_MS = 60_000L
 }

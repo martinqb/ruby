@@ -47,6 +47,8 @@
          other apps", asked once in Voice settings), or a full-screen notification without it. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Neither of those allowed: she turns the screen on herself while she talks (Android 14+ asks for this). -->
+    <uses-permission android:name="android.permission.TURN_SCREEN_ON" />
     <!-- Listening modes: hearing the wake word and conversation with Ruby in the background. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 

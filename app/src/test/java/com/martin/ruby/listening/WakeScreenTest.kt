@@ -18,9 +18,21 @@ class WakeScreenTest {
     }
 
     @Test
-    fun withDisplayOverOtherApps_herViewOpens_elseANotification() {
-        assertEquals(WakeScreen.Route.OPEN_VIEW, WakeScreen.route(rubyShown = false, canOpenFromBackground = true))
-        assertEquals(WakeScreen.Route.NOTIFICATION, WakeScreen.route(rubyShown = false, canOpenFromBackground = false))
+    fun withDisplayOverOtherApps_herViewOpens_elseAFullScreenNotification_elseSheWakesTheScreen() {
+        assertEquals(WakeScreen.Route.OPEN_VIEW, WakeScreen.route(rubyShown = false, canOpenFromBackground = true, canFullScreen = false))
+        assertEquals(WakeScreen.Route.FULL_SCREEN_NOTIFICATION, WakeScreen.route(rubyShown = false, canOpenFromBackground = false, canFullScreen = true))
+        // Never a black screen: with neither allowed she still turns it on.
+        assertEquals(WakeScreen.Route.WAKE_AND_NOTIFY, WakeScreen.route(rubyShown = false, canOpenFromBackground = false, canFullScreen = false))
+    }
+
+    @Test
+    fun theAsks_overlayFirst_thenFullScreen_eachOnce() {
+        assertEquals(null, WakeScreen.ask(canOverlay = true, overlayAsked = false, canFullScreen = false, fullScreenAsked = false))
+        assertEquals(WakeScreen.Ask.OVERLAY, WakeScreen.ask(canOverlay = false, overlayAsked = false, canFullScreen = false, fullScreenAsked = false))
+        // "Not now" to the first: then the fallback's access, once.
+        assertEquals(WakeScreen.Ask.FULL_SCREEN, WakeScreen.ask(canOverlay = false, overlayAsked = true, canFullScreen = false, fullScreenAsked = false))
+        assertEquals(null, WakeScreen.ask(canOverlay = false, overlayAsked = true, canFullScreen = false, fullScreenAsked = true))
+        assertEquals(null, WakeScreen.ask(canOverlay = false, overlayAsked = true, canFullScreen = true, fullScreenAsked = false))
     }
 
     @Test

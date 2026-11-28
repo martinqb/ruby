@@ -294,6 +294,14 @@ object RadioCommands {
             "${station.name} opened in iHeartRadio, but it didn't start playing, even after I pressed play. Press play there, or ask me again."
     }
 
+    /**
+     * Whether to say a station stopped in iHeartRadio: only if it's still the one Ruby last opened
+     * ([sameOpening]), it has stayed quiet, Ruby hasn't started her own radio (switching stations
+     * stops it, and that's no news), and she isn't listening or talking (her mic and voice pause it a moment).
+     */
+    fun reportIHeartStop(sameOpening: Boolean, stillQuiet: Boolean, rubysRadioOn: Boolean, rubyBusy: Boolean): Boolean =
+        sameOpening && stillQuiet && !rubysRadioOn && !rubyBusy
+
     /** What her "is playing in iHeartRadio" becomes once it stops or iHeartRadio is closed. */
     fun iHeartStoppedReply(station: Station): String = "${station.name} stopped in iHeartRadio."
 }
