@@ -66,6 +66,7 @@ interface SummaryDao {
         FROM messages
         WHERE timeMillis < :beforeMillis
           AND NOT (IFNULL(context, '') = 'Test' AND text LIKE 'Test note %')
+          AND role != 'knowledge'
           AND strftime('%Y-%m-%d', timeMillis / 1000, 'unixepoch', 'localtime') NOT IN (SELECT day FROM summaries)
         ORDER BY day
         LIMIT :limit
@@ -79,6 +80,7 @@ interface SummaryDao {
         SELECT * FROM messages
         WHERE strftime('%Y-%m-%d', timeMillis / 1000, 'unixepoch', 'localtime') = :day
           AND NOT (IFNULL(context, '') = 'Test' AND text LIKE 'Test note %')
+          AND role != 'knowledge'
         ORDER BY timeMillis, id
         """
     )

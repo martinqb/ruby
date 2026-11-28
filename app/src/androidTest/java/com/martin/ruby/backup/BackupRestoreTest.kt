@@ -38,6 +38,13 @@ class BackupRestoreTest {
 
     private fun isEmulator() = Build.HARDWARE in setOf("ranchu", "goldfish") || Build.FINGERPRINT.contains("generic")
 
+
+    /** Messages in memory, not counting her project knowledge notes (added again after a restore). */
+    private suspend fun chatCount(): Int {
+        val dao = MemoryDatabase.get(context).dao()
+        return dao.countNow() - dao.knowledge().size
+    }
+
     @Test
     fun backup_wipe_restore() = runBlocking {
         assumeTrue("Wipes memory: runs on an emulator only", isEmulator())
@@ -71,13 +78,18 @@ class BackupRestoreTest {
 
         // The messages and the search index came back.
         val found = store.search("park").first()
-        assertEquals(listOf("Parked on level 3, row C"), found.map { it.text })
+        assertEquals(listOf("Parked on level 3, row C"), found.filter { !it.isKnowledge }.map { it.text })
+        // The restore also brought her project knowledge up to date (the backup had none).
+        assertTrue(found.any { it.isKnowledge } || MemoryDatabase.get(context).dao().knowledge().isNotEmpty())
         assertTrue(manager.isSetUp())
 
         // Backups made after the restore still open with the original passphrase.
         store.add(MemoryMessage.ROLE_USER, "Added after the restore")
         val next = manager.makeBackup()
-        assertEquals(3, manager.unlock(next.bytes, passphrase).messageCount)
+        // Her project knowledge goes into backups too, so it survives a restore on a new phone.
+        val knowledge = MemoryDatabase.get(context).dao().knowledge().size
+        assertTrue(knowledge > 0)
+        assertEquals(3 + knowledge, manager.unlock(next.bytes, passphrase).messageCount)
 
         MemoryDatabase.get(context).dao().deleteAll()
     }
@@ -101,7 +113,7 @@ class BackupRestoreTest {
         assertEquals(48, backup.messageCount)
 
         wipe() // uninstalled
-        assertEquals(0, store.count().first()) // the new install opens memory first: fresh and empty
+        assertEquals(0, chatCount()) // the new install opens memory first: fresh and empty
         store.add(MemoryMessage.ROLE_USER, "Written on the new install before restoring")
 
         val unlocked = manager.unlock(backup.bytes, recoveryKey)
@@ -111,13 +123,13 @@ class BackupRestoreTest {
         }
         assertEquals(RestoreSession.State.Done::class, result::class)
         assertEquals(48, (result as RestoreSession.State.Done).count)
-        assertEquals(48, store.count().first())
+        assertEquals(48, chatCount())
         assertEquals(listOf(reminder.id), reminders.pending().map { it.id })
         assertTrue(manager.isSetUp())
 
         // After the app restarts, memory is still the restored one.
         MemoryDatabase.close()
-        assertEquals(48, store.count().first())
+        assertEquals(48, chatCount())
         assertEquals(listOf("Check the oven"), reminders.pending().map { it.text })
         RestoreSession.dismiss()
         wipe()
@@ -140,7 +152,7 @@ class BackupRestoreTest {
         job.cancel() // like the screen going away
         job.join()
 
-        assertEquals(5, store.count().first())
+        assertEquals(5, chatCount())
         assertTrue("The backup's key was kept too", manager.isSetUp())
         wipe()
     }

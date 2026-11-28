@@ -122,6 +122,9 @@ class BackupManager(context: Context) {
         // The backup brought its reminders along; Android needs their alarms set again.
         runCatching { ReminderStore(appContext).rescheduleAll() }
             .onFailure { SensingLog.add("Couldn't schedule restored reminders: ${it.message}") }
+        // An older backup has an older overview (or none): bring her project knowledge up to date.
+        runCatching { com.martin.ruby.memory.ProjectKnowledge.sync(appContext) }
+            .onFailure { SensingLog.add("Couldn't update project knowledge after restoring: ${it.message}") }
         count
     }
 

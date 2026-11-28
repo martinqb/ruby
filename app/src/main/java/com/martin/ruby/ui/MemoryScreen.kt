@@ -241,7 +241,7 @@ private fun MemoryContent(
 /** "21 Nov 2026, 14:32 · You · Driving" */
 private fun describe(message: MemoryMessage): String {
     val time = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(message.timeMillis))
-    val who = if (message.role == MemoryMessage.ROLE_RUBY) "Ruby" else "You"
+    val who = when (message.role) { MemoryMessage.ROLE_RUBY -> "Ruby"; MemoryMessage.ROLE_KNOWLEDGE -> "Project knowledge"; else -> "You" }
     return listOfNotNull(time, who, message.context).joinToString(" · ")
 }
 

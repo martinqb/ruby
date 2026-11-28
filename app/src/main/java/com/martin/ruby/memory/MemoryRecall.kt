@@ -35,9 +35,18 @@ object MemoryRecall {
             .filter { it !in COMMON_WORDS }
             .distinct()
             .take(MAX_WORDS)
-        if (words.isEmpty()) return null
-        return words.joinToString(" OR ") { "\"$it\"*" }
+        // Hyphenated words ("to-do", "wi-fi") as phrases, since their short parts are left out above.
+        val compounds = Regex("[\\p{L}\\p{N}]+(?:-[\\p{L}\\p{N}]+)+").findAll(message.lowercase(Locale.ROOT))
+            .map { it.value.replace('-', ' ') }
+            .distinct()
+            .toList()
+        if (words.isEmpty() && compounds.isEmpty()) return null
+        return (compounds.map { "\"$it\"" } + words.map { "\"$it\"*" }).joinToString(" OR ")
     }
+
+    /** How many project knowledge notes go with one message, and how long each may be. */
+    const val MAX_KNOWLEDGE = 2
+    const val MAX_KNOWLEDGE_CHARS = ProjectKnowledge.MAX_NOTE_CHARS
 
     /** Summaries are longer than messages; they're cut at this many characters. */
     const val MAX_SUMMARY_CHARS = 1_000
@@ -71,7 +80,13 @@ object MemoryRecall {
     ): List<Recalled> {
         val fromMessages = mutableListOf<Recalled>()
         val days = mutableSetOf<String>()
+        var knowledge = 0
         ranked.forEachIndexed { i, m ->
+            // Project knowledge goes as it is (it has no day to summarize), at most a few notes.
+            if (m.isKnowledge) {
+                if (knowledge++ < MAX_KNOWLEDGE) fromMessages += Recalled.Message(m)
+                return@forEachIndexed
+            }
             val summary = summaryOf(m)
             if (summary == null || i < KEEP_VERBATIM) fromMessages += Recalled.Message(m)
             else if (days.add(summary.day)) fromMessages += Recalled.Summary(summary)
@@ -97,6 +112,8 @@ object MemoryRecall {
             when (item) {
                 is Recalled.Message -> {
                     val m = item.message
+                    if (m.isKnowledge) return@joinToString "- From your project knowledge (Martin's overview of your project, kept up to date): " +
+                        shorten(m.text, MAX_KNOWLEDGE_CHARS)
                     val time = WHEN.format(Instant.ofEpochMilli(m.timeMillis).atZone(zone))
                     val where = m.context?.let { ", while $it" } ?: ""
                     val who = if (m.role == MemoryMessage.ROLE_RUBY) "you (Ruby) said" else "the user said"
