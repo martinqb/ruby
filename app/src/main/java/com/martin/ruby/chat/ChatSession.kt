@@ -14,6 +14,10 @@ import com.martin.ruby.memory.MemoryMessage
 import com.martin.ruby.memory.MemoryRecall
 import com.martin.ruby.memory.MemoryStore
 import com.martin.ruby.data.PlaceStore
+import com.martin.ruby.radio.PresetStore
+import com.martin.ruby.radio.Radio
+import com.martin.ruby.radio.RadioCommand
+import com.martin.ruby.radio.RadioCommands
 import com.martin.ruby.reminders.ReminderStore
 import com.martin.ruby.reminders.ReminderText
 import com.martin.ruby.reminders.ReminderTools
@@ -119,9 +123,49 @@ object ChatSession {
      */
     private var tools: ToolBox? = null
 
+    /**
+     * Ruby's "Opening WEBN 102.7 in iHeartRadio." reply, waiting to hear whether it really played
+     * ([Radio.iHeartNews]). [speak]: the request was one whose reply is read aloud.
+     */
+    private class IHeartReply(val attempt: Int, var turn: ChatTurn, val speak: Boolean)
+
+    private var iHeartReply: IHeartReply? = null
+    private var watchingIHeart = false
+
+    private fun watchIHeart(appContext: Context) {
+        if (watchingIHeart) return
+        watchingIHeart = true
+        scope.launch { Radio.iHeartNews.collect { onIHeartNews(appContext, it) } }
+    }
+
+    /**
+     * What happened in iHeartRadio: her "Opening…" reply (still the latest thing she said) becomes
+     * what really happened, so it doesn't stay on screen. If it didn't play, she also says so out
+     * loud when the request was spoken, and the message is kept in memory.
+     */
+    private suspend fun onIHeartNews(appContext: Context, news: Radio.IHeartNews) {
+        val pending = iHeartReply?.takeIf { it.attempt == news.attempt } ?: return
+        val updated = ChatTurn(fromUser = false, text = news.text)
+        val latest = _ui.value.turns.lastOrNull() === pending.turn
+        when {
+            latest -> _ui.update { it.copy(turns = it.turns.dropLast(1) + updated) }
+            // The chat moved on: only a failure is worth adding, and not in the middle of a reply.
+            news.failed && !_ui.value.sending -> _ui.update { it.copy(turns = it.turns + updated) }
+        }
+        pending.turn = updated
+        if (news.failed) {
+            iHeartReply = null
+            if (pending.speak) VoiceSession.play(news.text)
+            saveToMemory(MemoryStore(appContext), MemoryMessage.ROLE_RUBY, news.text)
+        } else if (!latest) {
+            iHeartReply = null // her reply is no longer on screen: nothing more to keep up to date
+        }
+    }
+
     /** Starts a fresh conversation. Memory keeps the old one, and can recall it from now on. */
     fun newConversation() {
         if (_ui.value.sending) return
+        iHeartReply = null
         conversationIds.clear()
         tools = null
         _ui.update { it.copy(turns = emptyList(), error = null, claudeOffer = null) }
@@ -151,6 +195,27 @@ object ChatSession {
 
         scope.launch {
             val memory = MemoryStore(appContext)
+            // Radio commands are done on the phone, in either engine, without asking any AI.
+            val radioCommand = RadioCommands.parse(
+                message, Radio.anythingPlaying(appContext), PresetStore(appContext).current(), retryOffered = Radio.retryOffered(),
+            )
+            if (radioCommand == null) Radio.forgetRetryOffer()
+            radioCommand?.let { command ->
+                saveToMemory(memory, MemoryMessage.ROLE_USER, message)
+                watchIHeart(appContext)
+                val attemptBefore = Radio.iHeartAttempt
+                val reply = when (command) {
+                    is RadioCommand.Play -> Radio.play(appContext, command.station)
+                    RadioCommand.Stop -> Radio.stopSaid(appContext)
+                    RadioCommand.NoStations -> RadioCommands.NO_STATIONS
+                }
+                val rubyTurn = ChatTurn(fromUser = false, text = reply)
+                _ui.update { it.copy(turns = it.turns + rubyTurn, sending = false, replying = null) }
+                // Opened in iHeartRadio: this reply is updated once the phone knows whether it played.
+                iHeartReply = if (Radio.iHeartAttempt != attemptBefore) IHeartReply(Radio.iHeartAttempt, rubyTurn, speak) else null
+                saveToMemory(memory, MemoryMessage.ROLE_RUBY, reply)
+                return@launch
+            }
             // Look before saving the new message, so it doesn't find itself.
             val memories = recall(memory, message)
             saveToMemory(memory, MemoryMessage.ROLE_USER, message)
@@ -161,6 +226,7 @@ object ChatSession {
                 // The reminders as they are right now, so Ruby never goes by stale tool results.
                 sent = ClaudeChat.compose(
                     message, label, now, currentReminders(appContext), currentPlaces(appContext), MemoryRecall.formatRecalled(memories),
+                    radio = Radio.note(),
                 ),
                 memoriesUsed = memories.size,
             )

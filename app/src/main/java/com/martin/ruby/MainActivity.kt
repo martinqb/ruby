@@ -30,6 +30,14 @@ import com.martin.ruby.ai.AiEngine
 import com.martin.ruby.ai.AiSettings
 import com.martin.ruby.ai.FreeMode
 import com.martin.ruby.backup.BackupManager
+import com.martin.ruby.radio.OtherRadioApps
+import com.martin.ruby.radio.PresetStore
+import com.martin.ruby.radio.Presets
+import com.martin.ruby.radio.Radio
+import com.martin.ruby.radio.RadioSearch
+import com.martin.ruby.ui.RadioScreen
+import com.martin.ruby.radio.RadioSettings
+import com.martin.ruby.ui.RadioActions
 import com.martin.ruby.backup.BackupStatusStore
 import com.martin.ruby.backup.NightlyBackup
 import com.martin.ruby.bluetooth.CarBluetooth
@@ -74,7 +82,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Which screen is showing. */
-private enum class Screen { MAIN, CHAT, REMINDERS, SUMMARIES, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT, BRIEFING }
+private enum class Screen { MAIN, CHAT, REMINDERS, SUMMARIES, CAR_PICKER, PLACES, MEMORY, BACKUP, STORAGE, EXPORT, BRIEFING, RADIO }
 
 class MainActivity : ComponentActivity() {
 
@@ -167,7 +175,23 @@ class MainActivity : ComponentActivity() {
                 val voice by VoiceSession.ui.collectAsState()
                 val briefing by remember { MorningBriefing.state(applicationContext) }.collectAsState(initial = BriefingState())
                 val briefingWorking by MorningBriefing.working.collectAsState()
+                val radio by Radio.state.collectAsState()
+                val radioAfterBriefing by remember { RadioSettings(applicationContext).startAfterBriefing }.collectAsState(initial = false)
+                val radioPresets by remember { PresetStore(applicationContext).presets }.collectAsState(initial = Presets())
                 var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
+                val radioActions = remember {
+                    RadioActions(
+                        onPlay = { Radio.play(applicationContext, it) },
+                        onStop = { Radio.stop(applicationContext) },
+                        onOpenInIHeart = { Radio.openInIHeart(applicationContext, it) },
+                        onOpenInOtherApp = { OtherRadioApps.open(applicationContext, it) },
+                        onVisible = { Radio.refreshOtherApps(applicationContext) },
+                        onAfterBriefing = { on -> lifecycleScope.launch { RadioSettings(applicationContext).setStartAfterBriefing(on) } },
+                        onPresets = { change -> lifecycleScope.launch { PresetStore(applicationContext).update(change) } },
+                        search = RadioSearch::search,
+                        onBack = { screen = Screen.MAIN },
+                    )
+                }
                 if (openStorageRequested) {
                     openStorageRequested = false
                     screen = Screen.STORAGE
@@ -248,6 +272,14 @@ class MainActivity : ComponentActivity() {
                             hasMicPermission = hasMicPermission,
                             context = context?.state?.label,
                             actions = chatActions.copy(onBack = { screen = Screen.MAIN }),
+                            modifier = modifier,
+                        )
+
+                        Screen.RADIO -> RadioScreen(
+                            state = radio,
+                            presets = radioPresets,
+                            afterBriefing = radioAfterBriefing,
+                            actions = radioActions,
                             modifier = modifier,
                         )
 
@@ -353,6 +385,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenMemory = { screen = Screen.MEMORY },
                                 onOpenReminders = { screen = Screen.REMINDERS },
                                 onOpenBriefing = { screen = Screen.BRIEFING },
+                                onOpenRadio = { screen = Screen.RADIO },
                                 onTestGps = { BackgroundSensing.testGps(this) },
                                 onClearLog = SensingLog::clear,
                             ),
@@ -363,6 +396,8 @@ class MainActivity : ComponentActivity() {
                                 hasMicPermission = hasMicPermission,
                                 chatActions = chatActions,
                                 liveLevel = VoiceSession::liveLevel,
+                                radio = radio,
+                                radioActions = radioActions,
                             ),
                         )
                     }
