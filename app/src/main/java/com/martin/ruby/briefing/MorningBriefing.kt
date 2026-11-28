@@ -24,6 +24,7 @@ import com.martin.ruby.memory.MemoryStore
 import com.martin.ruby.reminders.ReminderStore
 import com.martin.ruby.voice.VoiceSession
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -297,7 +298,20 @@ object MorningBriefing {
             return
         }
         val station = PresetStore(app).current().default?.station ?: return
-        withContext(Dispatchers.Main) { Radio.play(app, station) }
+        coroutineScope {
+            val attemptBefore = Radio.iHeartAttempt
+            // Listen before playing, so the news about this opening can't be missed.
+            val news = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(30_000) { Radio.iHeartNews.first { it.attempt > attemptBefore } }
+            }
+            withContext(Dispatchers.Main) { Radio.play(app, station) }
+            // A station opened in iHeartRadio that didn't start: say so, rather than leave the car silent.
+            if (Radio.iHeartAttempt != attemptBefore) {
+                news.await()?.takeIf { it.failed }?.let { VoiceSession.speakWhenReady(app, it.text, "Radio") }
+            } else {
+                news.cancel()
+            }
+        }
     }
 
     /** The briefing written by Gemini Nano on the phone. Throws [FreeMode.Failed]. */

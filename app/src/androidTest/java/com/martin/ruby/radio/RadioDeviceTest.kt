@@ -383,6 +383,118 @@ class RadioDeviceTest {
         }
     }
 
+    /** "Play WEBN" in the chat, with a stand-in for iHeartRadio and short waits; returns after Ruby's first reply. */
+    private fun playWebnInChat() {
+        Radio.iHeartStandIn = true
+        Radio.checkTimes = 1_500L to 1_500L
+        instrumentation.runOnMainSync {
+            ChatSession.newConversation()
+            ChatSession.send(context, "play WEBN")
+        }
+        assertTrue(waitUntil(5_000) { !ChatSession.ui.value.sending })
+        // Her reply: "Opening…", unless iHeartRadio was already playing and it's been updated already.
+        assertEquals(2, ChatSession.ui.value.turns.size)
+        assertTrue(
+            ChatSession.ui.value.turns.last().text in
+                setOf("Opening WEBN 102.7 in iHeartRadio.", "WEBN 102.7 is playing in iHeartRadio."),
+        )
+    }
+
+    private fun endStandIn() {
+        Radio.iHeartStandIn = false
+        Radio.checkTimes = IHeartStartCheck.AUTOPLAY_MS to IHeartStartCheck.AFTER_PRESS_MS
+        instrumentation.runOnMainSync {
+            Radio.pretendOpenedInIHeart(null)
+            ChatSession.newConversation()
+        }
+    }
+
+    @Test
+    fun webnOpens_butDoesntPlay_rubySaysSo_andTheOpeningNoteGoes() {
+        emulatorOnly()
+        try {
+            playWebnInChat()
+            val failed = RadioCommands.iHeartStartReply(Stations.WEBN, IHeartStart.NOT_PLAYING)
+            // Nothing plays, even after her press: "Opening…" becomes what happened (replaced, not added).
+            assertTrue("Ruby should say it didn't start", waitUntil(8_000) { ChatSession.ui.value.turns.last().text == failed })
+            assertEquals(2, ChatSession.ui.value.turns.size)
+            assertEquals(failed, Radio.state.value.problem)
+            assertEquals(Stations.WEBN, Radio.state.value.station) // for the screen's "Open in iHeartRadio" to try again
+            assertFalse(Radio.state.value.iHeartPlaying)
+            assertEquals("Play", Radio.state.value.buttonLabel(Stations.WEBN))
+        } finally {
+            endStandIn()
+        }
+    }
+
+    @Test
+    fun webnPlays_theNoteSaysSo_thenSaysStoppedWhenIHeartRadioCloses() {
+        emulatorOnly()
+        val other = otherAppPlaying() // iHeartRadio playing by itself
+        try {
+            assertTrue(waitUntil(3_000) { Radio.anythingPlaying(context) })
+            playWebnInChat()
+            assertTrue("Ruby should say it's playing", waitUntil(6_000) {
+                ChatSession.ui.value.turns.last().text == "WEBN 102.7 is playing in iHeartRadio."
+            })
+            assertEquals(null, Radio.state.value.problem)
+            assertTrue(waitUntil(3_000) { Radio.state.value.buttonLabel(Stations.WEBN) == "Open" })
+            other.release() // iHeartRadio closed
+            assertTrue("And stopped once it closes", waitUntil(5_000) {
+                ChatSession.ui.value.turns.last().text == "WEBN 102.7 stopped in iHeartRadio."
+            })
+            assertEquals(2, ChatSession.ui.value.turns.size)
+            assertEquals("Play", Radio.state.value.buttonLabel(Stations.WEBN))
+        } finally {
+            other.release()
+            endStandIn()
+        }
+    }
+
+    @Test
+    fun webnDoesntStartByItself_rubyPressesPlay_andItStarts() {
+        emulatorOnly()
+        // A stand-in for iHeartRadio: a paused media session that starts its audio when play is pressed.
+        var player: android.media.MediaPlayer? = null
+        var session: android.media.session.MediaSession? = null
+        var played = false
+        instrumentation.runOnMainSync {
+            session = android.media.session.MediaSession(context, "iHeartStandIn").apply {
+                setCallback(object : android.media.session.MediaSession.Callback() {
+                    override fun onPlay() {
+                        played = true
+                        player = otherAppPlaying()
+                        setPlaybackState(state(android.media.session.PlaybackState.STATE_PLAYING))
+                    }
+                })
+                setPlaybackState(state(android.media.session.PlaybackState.STATE_PAUSED))
+                isActive = true
+            }
+        }
+        try {
+            // Make it the session media keys go to, as iHeartRadio is after playing WEBN before: it played last.
+            val warmUp = otherAppPlaying()
+            instrumentation.runOnMainSync { session?.setPlaybackState(state(android.media.session.PlaybackState.STATE_PLAYING)) }
+            Thread.sleep(1_000)
+            warmUp.release()
+            instrumentation.runOnMainSync { session?.setPlaybackState(state(android.media.session.PlaybackState.STATE_PAUSED)) }
+            assertTrue(waitUntil(3_000) { !Radio.anythingPlaying(context) })
+            playWebnInChat()
+            assertTrue("Ruby should press play, and say it's playing", waitUntil(8_000) {
+                ChatSession.ui.value.turns.last().text == "WEBN 102.7 is playing in iHeartRadio."
+            })
+            assertTrue("play was pressed", played)
+        } finally {
+            player?.release()
+            instrumentation.runOnMainSync { session?.release() }
+            endStandIn()
+        }
+    }
+
+    private fun state(s: Int) = android.media.session.PlaybackState.Builder()
+        .setActions(android.media.session.PlaybackState.ACTION_PLAY or android.media.session.PlaybackState.ACTION_PAUSE)
+        .setState(s, 0, 1f).build()
+
     @Test
     fun webn_opensInIHeartRadio_orSaysItIsNotInstalled() {
         emulatorOnly()
